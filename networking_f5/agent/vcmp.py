@@ -36,24 +36,26 @@ RETRY_MAX = 3
 
 
 class F5vCMPBackend(object):
-    def __init__(self, cfg):
-        self.conf = cfg
+    def __init__(self, physical_device_mappings,
+                 username, password, host, guest):
         self.mgmt = None
-        self.vcmp_host = parse.urlparse(self.conf.F5_VCMP.host)
-        self.vcmp_guest = self.conf.F5_VCMP.guest or self.conf.host
-        self.interface_link = self.conf.F5_VCMP.interface
+        self.mappings = physical_device_mappings
+        self.vcmp_username = username
+        self.vcmp_password = password
+        self.vcmp_host = host
+        self.vcmp_guest = guest
         self._login()
 
     def _login(self):
-        if not self.vcmp_host.username or not self.vcmp_host.password:
-            LOG.error("Need to specifcy valid F5_VCMP.host configuration: "
-                      "http(s)://<username>:<password>@hostname")
+        if not self.vcmp_username or not self.vcmp_password:
+            LOG.error("Need to specifcy valid F5_VCMP.username and "
+                      "F5_VCMP.vcmp_password configuration.")
             sys.exit(1)
 
         self.mgmt = ManagementRoot(
-            self.vcmp_host.hostname,
-            self.vcmp_host.username,
-            self.vcmp_host.password,
+            self.vcmp_host,
+            self.vcmp_username,
+            self.vcmp_password,
             token=True
         )
 
@@ -90,9 +92,10 @@ class F5vCMPBackend(object):
                     old_vlan.update()
 
                 if not old_vlan.interfaces_s.interfaces.exists(
-                    name=self.interface_link):
+                    name=self.mappings[vlan['physical_network']]):
                     old_vlan.interfaces_s.interfaces.create(
-                        tagged=True, name=self.interface_link,
+                        tagged=True,
+                        name=self.mappings[vlan['physical_network']],
                         tagMode='service')
 
             # orphaned, try to delete but could be used by another vcmp guest
@@ -104,13 +107,14 @@ class F5vCMPBackend(object):
 
         # New ones
         for name, vlan in orig_vlans.items():
-            new_vlan = v.vlan.create(name=constants.PREFIX_VLAN + name,
+            new_vlan = v.vlan.create(name=name,
                                      partition='Common',
                                      tag=vlan['tag'], mtu=vlan['mtu'],
                                      hardwareSynccookie='enabled')
-            new_vlan.interfaces_s.interfaces.create(tagged=True,
-                                                    name=self.interface_link,
-                                                    tagMode='service')
+            new_vlan.interfaces_s.interfaces.create(
+                tagged=True,
+                name=self.mappings[vlan['physical_network']],
+                tagMode='service')
 
         # Assign VLANs to the correct guest, but keep mgmt networks
         try:
@@ -125,4 +129,4 @@ class F5vCMPBackend(object):
                 guest.vlans = new_vlans
                 guest.update()
         except iControlUnexpectedHTTPError as e:
-            LOG.error("Failure configuring guest VLAN", e)
+            LOG.error("Failure configuring guest VLAN: %s", e)

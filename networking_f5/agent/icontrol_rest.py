@@ -15,6 +15,7 @@ import sys
 
 from f5.bigip import ManagementRoot
 from icontrol.exceptions import iControlUnexpectedHTTPError
+from neutron_lib.utils import helpers
 from oslo_log import log as logging
 from prometheus_client import Summary, Counter
 from requests import Timeout, ConnectionError
@@ -34,11 +35,12 @@ RETRY_MAX = 3
 
 
 class F5iControlRestBackend(F5Backend):
-    def __init__(self, cfg, uri):
-        super(F5iControlRestBackend, self).__init__()
+    def __init__(self, cfg, uri, device_mappings):
+        super(F5iControlRestBackend, self).__init__(cfg, uri, device_mappings)
         self.conf = cfg
         self.device = parse.urlparse(uri)
         self.devices = []  # SelfIP Ports
+        self.device_mappings = device_mappings
         self.mgmt = None
 
         # Prometheus counters
@@ -64,9 +66,11 @@ class F5iControlRestBackend(F5Backend):
             verify=self.conf.F5.https_verify
         )
 
-        interface = self.conf.F5_VCMP.interface
-        trunk = self.mgmt.tm.net.trunks.trunk.load(name=interface)
-        self.mac = trunk.macAddress
+        for interface in self.device_mappings.values():
+            if self.mgmt.tm.net.trunks.trunk.exists(name=interface):
+                trunk = self.mgmt.tm.net.trunks.trunk.load(name=interface)
+                self.mac = trunk.macAddress
+                break
 
     def get_mac(self):
         return self.mac

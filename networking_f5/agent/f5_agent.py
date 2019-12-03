@@ -42,23 +42,14 @@ LOG = logging.getLogger(__name__)
 
 F5_OPTS = [
     cfg.StrOpt('backend',
-               default='do',
+               default='icontrol',
+               choices=['do', 'icontrol'],
                help=_('Backend driver for BigIP F5 communication')),
     cfg.FloatOpt('sync_interval', default=90,
                  help=_('Seconds between full sync.')),
     cfg.ListOpt('physical_device_mappings',
                 default=[],
-                help=_("List of <physical_network>:<device>.")),
-    cfg.IntOpt('mgmt_tag',
-               help=_("VLAN Tag for mgmt network")),
-    cfg.IntOpt('mgmt_mtu',
-               default='9000',
-               help=_("Default MTU for mgmt network")),
-    cfg.StrOpt('mgmt_address',
-               help=_("Self-IP for mgmt network")),
-    cfg.StrOpt('mgmt_trafficgroup',
-               default='traffic-group-local-only',
-               help=_("Default traffic groups for mgmt network")),
+                help=_("List of <physical_network>:<device_interface>.")),
     cfg.ListOpt('devices',
                 item_type=cfg.types.URI(schemes=['http', 'https']),
                 default=[],
@@ -72,16 +63,17 @@ F5_OPTS = [
 ]
 
 F5_VMCP_OPTS = [
-    cfg.StrOpt('interface',
-               default='portchannel1',
-               help=_("Interface to bind vlans on VCMP host")),
-    cfg.URIOpt('host',
-               schemes=['http', 'https'],
-               default=None,
-               help=_("VCMP host that need vlan configured for this guest")),
-    cfg.StrOpt('guest',
-               default=None,
-               help=_("VCMP guest name to identify the associated guest")),
+    cfg.StrOpt('username',
+               help=_('Username for vCMP Host.')),
+    cfg.StrOpt('password',
+               secret=True,
+               help=_('Password for vCMP Host')),
+    cfg.DictOpt('hosts_guest_mappings',
+                default={},
+                help=_("VCMP host and respective guest name mapping for "
+                       "assigning VLANs, consisting of a list "
+                       "of <host>:<guest_name>."),
+                )
 ]
 
 
@@ -99,7 +91,7 @@ class F5Backend(object):
     """Base class for F5 backend communication."""
 
     @abc.abstractmethod
-    def __init__(self):
+    def __init__(self, cfg, uri, device_mappings):
         """Constructor."""
 
     @abc.abstractmethod
@@ -184,7 +176,7 @@ class F5Manager(amb.CommonAgentManagerBase):
         self.plugin_rpc = F5DOPluginAPI(constants.TOPIC, self.host)
         self.ctx = context.get_admin_context_without_session()
         self.devices = []
-        self.vcmp = None
+        self.vcmps = []
         self._connect()
 
         LOG.debug("Ensuring all selfips bound for this agent")
@@ -198,15 +190,24 @@ class F5Manager(amb.CommonAgentManagerBase):
                 interval=sync_interval,
                 stop_on_exception=False)
 
+
+
     def _connect(self):
         self.devices = [driver.DriverManager(
             namespace='neutron.ml2.f5.backend_drivers',
             name=self.conf.F5.backend,
             invoke_on_load=True,
-            invoke_args=(self.conf, uri)
+            invoke_args=(self.conf, uri, self.device_mappings)
         ).driver for uri in sorted(self.conf.F5.devices)]
-        if self.conf.F5_VCMP.host:
-            self.vcmp = F5vCMPBackend(self.conf)
+        if self.conf.F5_VCMP.hosts_guest_mappings:
+            self.vcmps = [F5vCMPBackend(
+                self.device_mappings,
+                self.conf.F5_VCMP.username,
+                self.conf.F5_VCMP.password,
+                host,
+                guest
+            ) for host, guest in
+                self.conf.F5_VCMP.hosts_guest_mappings.items()]
 
     def get_all_devices(self):
         all_devices = set()
@@ -233,27 +234,22 @@ class F5Manager(amb.CommonAgentManagerBase):
 
     def get_rpc_consumers(self):
         return [[topics.PORT, topics.UPDATE],
-                [topics.PORT, topics.DELETE],
-                [topics.NETWORK, topics.DELETE],
                 [topics.NETWORK, topics.UPDATE]]
 
     def _full_sync(self):
         res = self.plugin_rpc.get_selfips_and_vlans(self.ctx)
-        for i, device in enumerate(self.devices):
+        for device in self.devices:
             device.sync_all(
-                vlans=res.get(
-                    'vlans',
-                    {}).copy(),
+                vlans=res.get('vlans', {}).copy(),
                 selfips={
-                    key: val for key,
-                    val in res.get(
+                    key: val for key, val in res.get(
                         'selfips',
-                        {}).items() if device.get_mac() == val.get(
-                        'mac',
-                        None)})
+                        {}).items() if
+                    device.get_mac() == val.get('mac', None)
+                })
 
-        if self.vcmp:
-            self.vcmp.sync_vlan(res['vlans'].copy())
+        for vcmp in self.vcmps:
+            vcmp.sync_vlan(res['vlans'].copy())
 
     def ensure_port_admin_state(self, device, admin_state_up):
         pass

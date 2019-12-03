@@ -50,15 +50,17 @@ class F5DORpcCallback(object):
         subnet_mapping = {}
         for port in query.all():
             tag = port.binding_levels[-1].segment.segmentation_id
+            physical_network = port.binding_levels[-1].segment.physical_network
             subnet_mapping[port.fixed_ips[0].subnet_id] = port.id
 
-            res['selfips'].update(
-                {
-                    port.id: {
-                        'ip_address': port.fixed_ips[0].ip_address,
-                        'vlan': port.network_id,
-                        'mac': port.device_id}})
-            res['vlans'].update({port.network_id: {'tag': tag}})
+            res['selfips'].update({
+                port.id: {
+                    'ip_address': port.fixed_ips[0].ip_address,
+                    'vlan': port.network_id,
+                    'mac': port.device_id}})
+            res['vlans'].update({port.network_id: {
+                'tag': tag,
+                'physical_network': physical_network}})
 
         # Update correct cidr prefix
         filters = {'id': subnet_mapping.keys()}
