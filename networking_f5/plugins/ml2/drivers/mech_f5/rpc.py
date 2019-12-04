@@ -56,7 +56,8 @@ class F5DORpcCallback(object):
             res['selfips'].update({
                 port.id: {
                     'ip_address': port.fixed_ips[0].ip_address,
-                    'vlan': port.network_id,
+                    'network_id': port.network_id,
+                    'tag': tag,
                     'mac': port.device_id}})
             res['vlans'].update({port.network_id: {
                 'tag': tag,

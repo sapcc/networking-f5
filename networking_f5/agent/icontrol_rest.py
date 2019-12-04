@@ -50,6 +50,9 @@ class F5iControlRestBackend(F5Backend):
         self.selfip_update = Counter('selfip_update', 'Updates of selfips')
         self.selfip_create = Counter('selfip_create', 'Creations of selfips')
         self.selfip_delete = Counter('selfip_delete', 'Deletions of selfips')
+        self.route_domain_update = Counter('route_domain_update', 'Updates of route_domains')
+        self.route_domain_create = Counter('route_domain_create', 'Creations of route_domains')
+        self.route_domain_delete = Counter('route_domain_delete', 'Deletions of route_domains')
         self._login()
 
     def _login(self):
@@ -132,11 +135,12 @@ class F5iControlRestBackend(F5Backend):
             elif old_sip.name in selfips:
                 selfip = selfips.pop(old_sip.name)
                 if old_sip.vlan != '/Common/{}'.format(
-                        selfip['vlan']
+                        selfip['network_id']
                 ) or old_sip.address != selfip['ip_address']:
                     old_sip.vlan = '/Common/{}'.format(
-                        constants.PREFIX_VLAN + selfip['vlan'])
-                    old_sip.address = selfip['ip_address']
+                        constants.PREFIX_VLAN + selfip['network_id'])
+                    old_sip.address = '%s%%%d'.format(
+                        selfip['ip_address'], selfip['tag'])
                     old_sip.update()
                     self.selfip_update.inc()
 
@@ -153,9 +157,53 @@ class F5iControlRestBackend(F5Backend):
             self.mgmt.tm.net.selfips.selfip.create(
                 name=constants.PREFIX_SELFIP + name,
                 partition='Common',
-                vlan=constants.PREFIX_VLAN + selfip['vlan'],
-                address=selfip['ip_address'])
+                vlan=constants.PREFIX_VLAN + selfip['network_id'],
+                address='%s%%%d'.format(
+                        selfip['ip_address'], selfip['tag']))
             self.selfip_create.inc()
+
+    REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
+        'sync_routedomains_seconds',
+        'Time spent processing routedomains')
+
+    @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
+    def _sync_routedomains(self, vlans):
+        prefixed_vlans = {
+            constants.PREFIX_VLAN +
+            name: val for name,
+            val in vlans.items()}
+        rds = self.mgmt.tm.net.route_domains
+        for rd in rds.get_collection():
+            # Not managed by agent
+            if not rd.name.startswith(constants.PREFIX_VLAN):
+                pass
+
+            # Update
+            elif rd.name in prefixed_vlans:
+                # TODO
+                vlan = prefixed_vlans.pop(rd.name)
+                vlans = ['/Common/{}'.format(rd.name)]
+                if rd.vlans != vlans or rd.id != vlan['tag']:
+                    rd.vlans == vlans
+                    rd.id = vlan['tag']
+                    rd.update()
+                    self.route_domain_update.inc()
+
+            # orphaned
+            else:
+                try:
+                    rd.delete()
+                    self.route_domain_delete.inc()
+                except iControlUnexpectedHTTPError:
+                    pass
+
+        # New ones
+        for name, vlan in prefixed_vlans.items():
+            rds.route_domain.create(
+                name=name, partition='Common', id=vlan['tag'],
+                vlans=['/Common/{}'.format(name)])
+            self.route_domain_create.inc()
+
 
     SYNC_ALL_EXCEPTIONS = Counter(
         'sync_exceptions',
@@ -175,9 +223,15 @@ class F5iControlRestBackend(F5Backend):
             LOG.exception(e)
 
         try:
+            self._sync_routedomains(vlans)
+        except iControlUnexpectedHTTPError as e:
+            LOG.exception(e)
+
+        try:
             self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
+
 
     def plug_interface(self, network_segment, device):
         name = constants.PREFIX_SELFIP + device

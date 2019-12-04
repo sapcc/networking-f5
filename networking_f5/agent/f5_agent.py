@@ -162,7 +162,6 @@ class F5DOAgentManagerRpcCallBackBase(amb.CommonAgentManagerRpcCallBackBase):
     def port_update(self, context, **kwargs):
         port = kwargs['port']
         LOG.debug("port_update received for port %s ", port)
-        self.agent.mgr.set_mapping(port)
         self.updated_devices.add(port['mac_address'])
 
 
