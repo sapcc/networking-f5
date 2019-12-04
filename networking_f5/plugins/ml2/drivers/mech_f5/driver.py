@@ -136,9 +136,10 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
 
         # Only accept listener_ips
         if context.current['device_owner'] != constants.DEVICE_OWNER_LISTENER:
-            raise Exception(
-                "Port '{}' has not a valid owner description".format(
-                    context.current['id']))
+            LOG.debug("Port '{}' has not a valid owner description, "
+                      "not managed by us."
+                      .format(context.current['id']))
+            return
 
         # Need at least one ip address assigned
         if len(context.current['fixed_ips']) < 1:
