@@ -158,8 +158,12 @@ class F5iControlRestBackend(F5Backend):
                 name=constants.PREFIX_SELFIP + name,
                 partition='Common',
                 vlan=constants.PREFIX_VLAN + selfip['network_id'],
-                address='%s%%%d'.format(
-                        selfip['ip_address'], selfip['tag']))
+                address='{}%{}/{}'.format(
+                    selfip['ip_address'],
+                    selfip['tag'],
+                    selfip['prefixlen']
+                ),
+            )
             self.selfip_create.inc()
 
     REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
@@ -184,7 +188,7 @@ class F5iControlRestBackend(F5Backend):
                 vlan = prefixed_vlans.pop(rd.name)
                 vlans = ['/Common/{}'.format(rd.name)]
                 if rd.vlans != vlans or rd.id != vlan['tag']:
-                    rd.vlans == vlans
+                    rd.vlans = vlans
                     rd.id = vlan['tag']
                     rd.update()
                     self.route_domain_update.inc()
@@ -199,11 +203,14 @@ class F5iControlRestBackend(F5Backend):
 
         # New ones
         for name, vlan in prefixed_vlans.items():
-            rds.route_domain.create(
-                name=name, partition='Common', id=vlan['tag'],
-                vlans=['/Common/{}'.format(name)])
-            self.route_domain_create.inc()
-
+            try:
+                rds.route_domain.create(
+                    name=name, partition='Common', id=vlan['tag'],
+                    vlans=['/Common/{}'.format(name)])
+                self.route_domain_create.inc()
+            except iControlUnexpectedHTTPError:
+                # Try deleting selfip first and let it resync next time
+                self.mgmt.tm.net.selfips.selfip.delete()
 
     SYNC_ALL_EXCEPTIONS = Counter(
         'sync_exceptions',

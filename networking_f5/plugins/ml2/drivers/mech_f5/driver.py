@@ -88,6 +88,10 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         fixed_ip = context.current['fixed_ips'][0]
 
         agents = context.host_agents(constants.AGENT_TYPE_F5)
+        if not agents:
+            # rebind only if agents available
+            return
+
         mac_addresses = agents[0]['configurations'].get('device_macs', 0)
 
         filter = {'device_owner': [constants.DEVICE_OWNER_SELFIP],

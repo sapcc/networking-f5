@@ -68,12 +68,9 @@ class F5DORpcCallback(object):
         subnets = self.plugin.get_subnets(
             context, filters, fields=['cidr', 'id'])
         for subnet in subnets:
-            prefix = IPNetwork(subnet['cidr']).prefixlen
+            prefixlen = IPNetwork(subnet['cidr']).prefixlen
             port_id = subnet_mapping[subnet['id']]
-
-            cidr = '{}/{}'.format(res['selfips'][port_id]
-                                  ['ip_address'], prefix)
-            res['selfips'][port_id].update({'ip_address': cidr})
+            res['selfips'][port_id].update({'prefixlen': prefixlen})
 
         # Update correct MTU values
         filters = {'id': res['vlans'].keys()}
