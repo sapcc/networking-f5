@@ -15,7 +15,7 @@
 from neutron_lib import constants
 
 AGENT_BINARY = 'neutron-f5-agent'
-AGENT_TYPE_F5 = 'F5 ML2 Agent'
+AGENT_TYPE_F5 = 'F5 Agent'
 TOPIC = 'f5'
 VIF_TYPE_F5 = 'f5'
 RPC_VERSION = '1.0'
