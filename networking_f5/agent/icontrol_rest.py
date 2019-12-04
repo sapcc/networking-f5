@@ -15,7 +15,6 @@ import sys
 
 from f5.bigip import ManagementRoot
 from icontrol.exceptions import iControlUnexpectedHTTPError
-from neutron_lib.utils import helpers
 from oslo_log import log as logging
 from prometheus_client import Summary, Counter
 from requests import Timeout, ConnectionError
@@ -123,6 +122,19 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
+        def convert_ip(selfip):
+            return '{}%{}/{}'.format(
+                    selfip['ip_address'],
+                    selfip['tag'],
+                    selfip['prefixlen']
+                )
+
+        def get_vlan_path(selfip):
+            return '/Common/{}{}'.format(
+                constants.PREFIX_VLAN,
+                selfip['network_id']
+            )
+
         sips = self.mgmt.tm.net.selfips.get_collection()
         self.devices = [sip.name[len(constants.PREFIX_SELFIP):] for sip in sips
                         if sip.name.startswith(constants.PREFIX_SELFIP)]
@@ -134,13 +146,10 @@ class F5iControlRestBackend(F5Backend):
             # Update
             elif old_sip.name in selfips:
                 selfip = selfips.pop(old_sip.name)
-                if old_sip.vlan != '/Common/{}'.format(
-                        selfip['network_id']
-                ) or old_sip.address != selfip['ip_address']:
-                    old_sip.vlan = '/Common/{}'.format(
-                        constants.PREFIX_VLAN + selfip['network_id'])
-                    old_sip.address = '%s%%%d'.format(
-                        selfip['ip_address'], selfip['tag'])
+                if old_sip.vlan != get_vlan_path(
+                        selfip) or old_sip.address != convert_ip(selfip):
+                    old_sip.vlan = get_vlan_path(selfip)
+                    old_sip.address = convert_ip(selfip)
                     old_sip.update()
                     self.selfip_update.inc()
 
@@ -158,11 +167,7 @@ class F5iControlRestBackend(F5Backend):
                 name=constants.PREFIX_SELFIP + name,
                 partition='Common',
                 vlan=constants.PREFIX_VLAN + selfip['network_id'],
-                address='{}%{}/{}'.format(
-                    selfip['ip_address'],
-                    selfip['tag'],
-                    selfip['prefixlen']
-                ),
+                address=convert_ip(selfip),
             )
             self.selfip_create.inc()
 
