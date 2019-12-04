@@ -13,6 +13,7 @@
 # under the License.
 import sys
 
+import netaddr
 from f5.bigip import ManagementRoot
 from icontrol.exceptions import iControlUnexpectedHTTPError
 from oslo_log import log as logging
@@ -52,6 +53,9 @@ class F5iControlRestBackend(F5Backend):
         self.route_domain_update = Counter('route_domain_update', 'Updates of route_domains')
         self.route_domain_create = Counter('route_domain_create', 'Creations of route_domains')
         self.route_domain_delete = Counter('route_domain_delete', 'Deletions of route_domains')
+        self.route_update = Counter('route_update', 'Updates of routes')
+        self.route_create = Counter('route_create', 'Creations of routes')
+        self.route_delete = Counter('route_delete', 'Deletions of routes')
         self._login()
 
     def _login(self):
@@ -77,16 +81,21 @@ class F5iControlRestBackend(F5Backend):
     def get_mac(self):
         return self.mac
 
+    @staticmethod
+    def _prefix(collection, prefix):
+        return {
+            prefix + name: val
+            for name, val
+            in collection.items()
+        }
+
     REQUEST_TIME_SYNC_VLANS = Summary(
         'sync_vlan_seconds',
         'Time spent processing vlans')
 
     @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
-        new_vlans = {
-            constants.PREFIX_VLAN +
-            name: val for name,
-            val in vlans.items()}
+        new_vlans = self._prefix(vlans, constants.PREFIX_VLAN)
         v = self.mgmt.tm.net.vlans
         for old_vlan in v.get_collection():
             # Not managed by agent
@@ -123,6 +132,10 @@ class F5iControlRestBackend(F5Backend):
     @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
         def convert_ip(selfip):
+            if selfip['ip_address'].find('/') >= 0:
+                selfip['prefixlen'] = netaddr.IPNetwork(selfip['ip_address']).prefixlen
+                selfip['ip_address'] = str(netaddr.IPNetwork(selfip['ip_address']).ip)
+
             return '{}%{}/{}'.format(
                     selfip['ip_address'],
                     selfip['tag'],
@@ -135,6 +148,8 @@ class F5iControlRestBackend(F5Backend):
                 selfip['network_id']
             )
 
+        prefixed_selfips = self._prefix(
+            selfips, constants.PREFIX_SELFIP)
         sips = self.mgmt.tm.net.selfips.get_collection()
         self.devices = [sip.name[len(constants.PREFIX_SELFIP):] for sip in sips
                         if sip.name.startswith(constants.PREFIX_SELFIP)]
@@ -144,8 +159,8 @@ class F5iControlRestBackend(F5Backend):
                 continue
 
             # Update
-            elif old_sip.name in selfips:
-                selfip = selfips.pop(old_sip.name)
+            elif old_sip.name in prefixed_selfips:
+                selfip = prefixed_selfips.pop(old_sip.name)
                 if old_sip.vlan != get_vlan_path(
                         selfip) or old_sip.address != convert_ip(selfip):
                     old_sip.vlan = get_vlan_path(selfip)
@@ -159,7 +174,7 @@ class F5iControlRestBackend(F5Backend):
                 self.selfip_delete.inc()
 
         # New ones
-        for name, selfip in selfips.items():
+        for name, selfip in prefixed_selfips.items():
             if self.mac != selfip['mac']:
                 continue
 
@@ -177,10 +192,7 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
-        prefixed_vlans = {
-            constants.PREFIX_VLAN +
-            name: val for name,
-            val in vlans.items()}
+        prefixed_vlans = self._prefix(vlans, constants.PREFIX_VLAN)
         rds = self.mgmt.tm.net.route_domains
         for rd in rds.get_collection():
             # Not managed by agent
@@ -217,6 +229,56 @@ class F5iControlRestBackend(F5Backend):
                 # Try deleting selfip first and let it resync next time
                 self.mgmt.tm.net.selfips.selfip.delete()
 
+    REQUEST_TIME_SYNC_ROUTES = Summary(
+        'sync_routes_seconds',
+        'Time spent processing routes')
+
+    @REQUEST_TIME_SYNC_ROUTES.time()
+    def _sync_routes(self, selfips):
+        prefixed_selfips = self._prefix(
+            selfips, constants.PREFIX_SELFIP)
+        routes = self.mgmt.tm.net.routes
+        for route in routes.get_collection():
+            # Not managed by agent
+            if not route.name.startswith(constants.PREFIX_SELFIP):
+                pass
+
+            # Update
+            elif route.name in selfips:
+                selfip = prefixed_selfips.pop(route.name)
+                gateway = '{}%{}'.format(
+                    netaddr.IPNetwork('{}/{}'.format(
+                        selfip['ip_address'],
+                        selfip['prefixlen']
+                    ))[1],
+                    selfip['tag']
+                )
+                if route.gw != gateway:
+                    route.gw = gateway
+                    route.update()
+                    self.route_update.inc()
+
+            # orphaned
+            else:
+                try:
+                    route.delete()
+                    self.route_delete.inc()
+                except iControlUnexpectedHTTPError:
+                    pass
+
+        # New ones
+        for name, selfip in prefixed_selfips.items():
+            gateway = '{}%{}'.format(
+                netaddr.IPNetwork('{}/{}'.format(
+                    selfip['ip_address'],
+                    selfip['prefixlen']
+                ))[1],
+                selfip['tag']
+            )
+            routes.route.create(network='default',
+                name=name, partition='Common', gw=gateway)
+            self.route_create.inc()
+
     SYNC_ALL_EXCEPTIONS = Counter(
         'sync_exceptions',
         'Exceptions during sync_all')
@@ -244,6 +306,10 @@ class F5iControlRestBackend(F5Backend):
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
+        try:
+            self._sync_routes(selfips)
+        except iControlUnexpectedHTTPError as e:
+            LOG.exception(e)
 
     def plug_interface(self, network_segment, device):
         name = constants.PREFIX_SELFIP + device
