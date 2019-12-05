@@ -144,24 +144,15 @@ class F5DOAgentManagerRpcCallBackBase(amb.CommonAgentManagerRpcCallBackBase):
         pass
 
     def add_network(self, network_id, network_segment):
-        LOG.info(
-            "Added {} with segment {}".format(
-                network_id,
-                network_segment))
         self.network_map[network_id] = network_segment
 
     def network_update(self, context, **kwargs):
         network_id = kwargs['network']['id']
-        LOG.debug("network_update message processed for network "
-                  "%(network_id)s, with ports: %(ports)s",
-                  {'network_id': network_id,
-                   'ports': self.agent.network_ports[network_id]})
         for port_data in self.agent.network_ports[network_id]:
             self.updated_devices.add(port_data['device'])
 
     def port_update(self, context, **kwargs):
         port = kwargs['port']
-        LOG.debug("port_update received for port %s ", port)
         self.updated_devices.add(port['mac_address'])
 
 

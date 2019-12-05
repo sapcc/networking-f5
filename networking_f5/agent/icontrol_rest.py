@@ -192,7 +192,7 @@ class F5iControlRestBackend(F5Backend):
 
             self.mgmt.tm.net.selfips.selfip.create(
                 name=name,
-                partition=constants.PREFIX_VLAN + selfip['network_id'],
+                partition='Common',
                 vlan=constants.PREFIX_VLAN + selfip['network_id'],
                 address=convert_ip(selfip),
             )
@@ -285,7 +285,7 @@ class F5iControlRestBackend(F5Backend):
             )
             network = '0.0.0.0%{}/0'.format(selfip['tag'])
             routes.route.create(network=network, gw=gateway,
-                name=name, partition=constants.PREFIX_VLAN + selfip['network_id'])
+                name=name, partition='Common')
             self.route_create.inc()
 
     REQUEST_TIME_SYNC_PARTITIONS = Summary(
@@ -335,26 +335,31 @@ class F5iControlRestBackend(F5Backend):
     @SYNC_ALL_EXCEPTIONS.count_exceptions()
     def sync_all(self, vlans, selfips):
         try:
+            LOG.debug("Syncing vlans %s", vlans)
             self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
+            LOG.debug("Syncing routedomains %s", vlans)
             self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
+            LOG.debug("Syncing partitions %s", vlans)
             self._sync_partitions(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
+            LOG.debug("Syncing selfips %s", vlans)
             self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
+            LOG.debug("Syncing routes %s", vlans)
             self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
