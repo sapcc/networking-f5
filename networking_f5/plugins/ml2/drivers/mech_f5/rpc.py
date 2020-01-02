@@ -68,10 +68,11 @@ class F5DORpcCallback(object):
         subnets = self.plugin.get_subnets(
             context, filters, fields=['cidr', 'id', 'gateway_ip'])
         for subnet in subnets:
-            prefixlen = IPNetwork(subnet['cidr']).prefixlen
+            network = IPNetwork(subnet['cidr'])
             port_id = subnet_mapping[subnet['id']]
             res['selfips'][port_id].update({
-                'prefixlen': prefixlen,
+                'network': str(network.network),
+                'prefixlen': network.prefixlen,
                 'gateway_ip': subnet['gateway_ip']
             })
 

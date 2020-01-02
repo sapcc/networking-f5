@@ -82,7 +82,13 @@ class F5iControlRestBackend(F5Backend):
         return self.mac
 
     @staticmethod
-    def _prefix(collection, prefix):
+    def _prefix(collection, prefix, replace_hyphen=False):
+        if replace_hyphen:
+            return {
+                (prefix + name).replace('-', '_'): val
+                for name, val
+                in collection.items()
+            }
         return {
             prefix + name: val
             for name, val
@@ -247,6 +253,11 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
+        def _get_network(selfip):
+            return '{}%{}/{}'.format(
+                selfip.get('network', 'default'), selfip['tag'],
+                selfip['prefixlen'])
+
         prefixed_selfips = self._prefix(
             selfips, constants.PREFIX_SELFIP)
         routes = self.mgmt.tm.net.routes
@@ -256,13 +267,13 @@ class F5iControlRestBackend(F5Backend):
                 pass
 
             # Update
-            elif route.name in selfips:
+            elif route.name in prefixed_selfips:
                 selfip = prefixed_selfips.pop(route.name)
                 gateway = '{}%{}'.format(
                     selfip['gateway_ip'],
                     selfip['tag']
                 )
-                network = '0.0.0.0%{}/0'.format(selfip['tag'])
+                network = _get_network(selfip)
                 if route.gw != gateway or route.network != network:
                     route.gw = gateway
                     route.network = network
@@ -283,7 +294,7 @@ class F5iControlRestBackend(F5Backend):
                 selfip['gateway_ip'],
                 selfip['tag']
             )
-            network = '0.0.0.0%{}/0'.format(selfip['tag'])
+            network = _get_network(selfip)
             routes.route.create(network=network, gw=gateway,
                 name=name, partition='Common')
             self.route_create.inc()
@@ -294,11 +305,12 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_PARTITIONS.time()
     def _sync_partitions(self, vlans):
-        prefixed_vlans = self._prefix(vlans, constants.PREFIX_VLAN)
+        prefixed_vlans = self._prefix(vlans,
+            constants.PREFIX_VLAN, True)
         partitions = self.mgmt.tm.auth.partitions
         for partition in partitions.get_collection():
             # Not managed by agent
-            if not partition.name.startswith(constants.PREFIX_VLAN):
+            if not partition.name.startswith(constants.PREFIX_VLAN.replace('-', '_')):
                 pass
 
             # Update
