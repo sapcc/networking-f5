@@ -12,8 +12,10 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 import sys
+from collections import defaultdict
 
 import netaddr
+from itertools import combinations
 from f5.bigip import ManagementRoot
 from icontrol.exceptions import iControlUnexpectedHTTPError
 from oslo_log import log as logging
@@ -253,13 +255,17 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
-        def _get_network(selfip):
-            return '{}%{}/{}'.format(
-                selfip.get('network', 'default'), selfip['tag'],
-                selfip['prefixlen'])
-
         prefixed_selfips = self._prefix(
             selfips, constants.PREFIX_SELFIP)
+
+        # We only need one route per network, remove larger gateway IPs
+        tmp = defaultdict(list)
+        for val in prefixed_selfips.values():
+            tmp[val['network_id']].append(int(netaddr.IPAddress(val['gateway_ip'])))
+
+        prefixed_selfips = dict((key, val) for key, val in prefixed_selfips.items()
+                                if int(netaddr.IPAddress(val['gateway_ip'])) == min(tmp[val['network_id']]))
+
         routes = self.mgmt.tm.net.routes
         for route in routes.get_collection():
             # Not managed by agent
@@ -273,7 +279,7 @@ class F5iControlRestBackend(F5Backend):
                     selfip['gateway_ip'],
                     selfip['tag']
                 )
-                network = _get_network(selfip)
+                network = 'default%{}'.format(selfip['tag'])
                 if route.gw != gateway or route.network != network:
                     route.gw = gateway
                     route.network = network
@@ -294,7 +300,7 @@ class F5iControlRestBackend(F5Backend):
                 selfip['gateway_ip'],
                 selfip['tag']
             )
-            network = _get_network(selfip)
+            network = 'default%{}'.format(selfip['tag'])
             routes.route.create(network=network, gw=gateway,
                 name=name, partition='Common')
             self.route_create.inc()
@@ -347,25 +353,25 @@ class F5iControlRestBackend(F5Backend):
     @SYNC_ALL_EXCEPTIONS.count_exceptions()
     def sync_all(self, vlans, selfips):
         try:
-            LOG.debug("Syncing vlans %s", vlans)
+            LOG.debug("Syncing vlans %d", len(vlans))
             self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing routedomains %s", vlans)
+            LOG.debug("Syncing routedomains %d", len(vlans))
             self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing partitions %s", vlans)
+            LOG.debug("Syncing partitions %d", len(vlans))
             self._sync_partitions(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing selfips %s", vlans)
+            LOG.debug("Syncing selfips %d", len(selfips))
             self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
