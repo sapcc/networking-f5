@@ -47,11 +47,11 @@ class F5DORpcCallback(object):
         query = self.plugin._get_ports_query(context, filters=filters)
 
         res = collections.defaultdict(dict)
-        subnet_mapping = {}
+        subnet_mapping = collections.defaultdict(list)
         for port in query.all():
             tag = port.binding_levels[-1].segment.segmentation_id
             physical_network = port.binding_levels[-1].segment.physical_network
-            subnet_mapping[port.fixed_ips[0].subnet_id] = port.id
+            subnet_mapping[port.fixed_ips[0].subnet_id].append(port.id)
 
             res['selfips'].update({
                 port.id: {
@@ -69,12 +69,12 @@ class F5DORpcCallback(object):
             context, filters, fields=['cidr', 'id', 'gateway_ip'])
         for subnet in subnets:
             network = IPNetwork(subnet['cidr'])
-            port_id = subnet_mapping[subnet['id']]
-            res['selfips'][port_id].update({
-                'network': str(network.network),
-                'prefixlen': network.prefixlen,
-                'gateway_ip': subnet['gateway_ip']
-            })
+            for port_id in subnet_mapping[subnet['id']]:
+                res['selfips'][port_id].update({
+                    'network': str(network.network),
+                    'prefixlen': network.prefixlen,
+                    'gateway_ip': subnet['gateway_ip']
+                })
 
         # Update correct MTU values
         filters = {'id': res['vlans'].keys()}
