@@ -15,7 +15,6 @@ import sys
 from collections import defaultdict
 
 import netaddr
-from itertools import combinations
 from f5.bigip import ManagementRoot
 from icontrol.exceptions import iControlUnexpectedHTTPError
 from oslo_log import log as logging
@@ -36,15 +35,8 @@ RETRY_BACKOFF = 5
 RETRY_MAX = 3
 
 
-class F5iControlRestBackend(F5Backend):
-    def __init__(self, cfg, uri, device_mappings):
-        super(F5iControlRestBackend, self).__init__(cfg, uri, device_mappings)
-        self.conf = cfg
-        self.device = parse.urlparse(uri)
-        self.devices = []  # SelfIP Ports
-        self.device_mappings = device_mappings
-        self.mgmt = None
-
+class PromInstance(object):
+    def __init__(self):
         # Prometheus counters
         self.vlan_update = Counter('vlan_update', 'Updates of vlans')
         self.vlan_create = Counter('vlan_create', 'Creations of vlans')
@@ -58,6 +50,19 @@ class F5iControlRestBackend(F5Backend):
         self.route_update = Counter('route_update', 'Updates of routes')
         self.route_create = Counter('route_create', 'Creations of routes')
         self.route_delete = Counter('route_delete', 'Deletions of routes')
+
+
+PROM_INSTANCE = PromInstance()
+
+
+class F5iControlRestBackend(F5Backend):
+    def __init__(self, cfg, uri, device_mappings):
+        super(F5iControlRestBackend, self).__init__(cfg, uri, device_mappings)
+        self.conf = cfg
+        self.device = parse.urlparse(uri)
+        self.devices = []  # SelfIP Ports
+        self.device_mappings = device_mappings
+        self.mgmt = None
         self._login()
 
     def _login(self):
@@ -126,13 +131,13 @@ class F5iControlRestBackend(F5Backend):
                     old_vlan.tag = vlan['tag']
                     old_vlan.mtu = vlan['mtu']
                     old_vlan.update()
-                    self.vlan_update.inc()
+                    PROM_INSTANCE.vlan_update.inc()
 
             # orphaned
             else:
                 try:
                     old_vlan.delete()
-                    self.vlan_delete.inc()
+                    PROM_INSTANCE.vlan_delete.inc()
                 except iControlUnexpectedHTTPError:
                     pass
 
@@ -140,7 +145,7 @@ class F5iControlRestBackend(F5Backend):
         for name, vlan in new_vlans.items():
             v.vlan.create(name=name, partition='Common',
                           tag=vlan['tag'], mtu=vlan['mtu'])
-            self.vlan_create.inc()
+            PROM_INSTANCE.vlan_create.inc()
 
     REQUEST_TIME_SYNC_SELFIPS = Summary(
         'sync_selfip_seconds',
@@ -183,13 +188,13 @@ class F5iControlRestBackend(F5Backend):
                     old_sip.vlan = get_vlan_path(selfip)
                     old_sip.address = convert_ip(selfip)
                     old_sip.update()
-                    self.selfip_update.inc()
+                    PROM_INSTANCE.selfip_update.inc()
 
             # orphaned
             else:
                 try:
                     old_sip.delete()
-                    self.selfip_delete.inc()
+                    PROM_INSTANCE.selfip_delete.inc()
                 except iControlUnexpectedHTTPError:
                     self.try_delete_object('route', old_sip.name)
 
@@ -204,7 +209,7 @@ class F5iControlRestBackend(F5Backend):
                 vlan=constants.PREFIX_VLAN + selfip['network_id'],
                 address=convert_ip(selfip),
             )
-            self.selfip_create.inc()
+            PROM_INSTANCE.selfip_create.inc()
 
     REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
         'sync_routedomains_seconds',
@@ -228,13 +233,13 @@ class F5iControlRestBackend(F5Backend):
                     rd.vlans = vlans
                     rd.id = vlan['tag']
                     rd.update()
-                    self.route_domain_update.inc()
+                    PROM_INSTANCE.route_domain_update.inc()
 
             # orphaned
             else:
                 try:
                     rd.delete()
-                    self.route_domain_delete.inc()
+                    PROM_INSTANCE.route_domain_delete.inc()
                 except iControlUnexpectedHTTPError:
                     pass
 
@@ -244,7 +249,7 @@ class F5iControlRestBackend(F5Backend):
                 rds.route_domain.create(
                     name=name, partition='Common', id=vlan['tag'],
                     vlans=['/Common/{}'.format(name)])
-                self.route_domain_create.inc()
+                PROM_INSTANCE.route_domain_create.inc()
             except iControlUnexpectedHTTPError:
                 # Try deleting selfip first and let it resync next time
                 self.try_delete_object('selfip', name)
@@ -284,13 +289,13 @@ class F5iControlRestBackend(F5Backend):
                     route.gw = gateway
                     route.network = network
                     route.update()
-                    self.route_update.inc()
+                    PROM_INSTANCE.route_update.inc()
 
             # orphaned
             else:
                 try:
                     route.delete()
-                    self.route_delete.inc()
+                    PROM_INSTANCE.route_delete.inc()
                 except iControlUnexpectedHTTPError:
                     pass
 
@@ -303,7 +308,7 @@ class F5iControlRestBackend(F5Backend):
             network = 'default%{}'.format(selfip['tag'])
             routes.route.create(network=network, gw=gateway,
                 name=name, partition='Common')
-            self.route_create.inc()
+            PROM_INSTANCE.route_create.inc()
 
     REQUEST_TIME_SYNC_PARTITIONS = Summary(
         'sync_partitions_seconds',
