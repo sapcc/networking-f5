@@ -88,6 +88,9 @@ class F5iControlRestBackend(F5Backend):
     def get_mac(self):
         return self.mac
 
+    def get_host(self):
+        return self.device.hostname
+
     @staticmethod
     def _prefix(collection, prefix, replace_hyphen=False):
         if replace_hyphen:

@@ -66,16 +66,17 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
             'device_mappings', {})
 
     @staticmethod
-    def _make_selfip_dict(listener_port, device_mac):
+    def _make_selfip_dict(listener_port, device_id, description):
         fixed_ip = listener_port['fixed_ips'][0]
         return {
             'port': {
                 'tenant_id': listener_port['tenant_id'],
                 'binding:host_id': listener_port['binding:host_id'],
-                'name': 'self-ip-{}'.format(fixed_ip['subnet_id']),
+                'name': 'self-ip-subnet-{}'.format(fixed_ip['subnet_id']),
                 'network_id': listener_port['network_id'],
                 'device_owner': constants.DEVICE_OWNER_SELFIP,
-                'device_id': device_mac,
+                'device_id': device_id,
+                'description': description,
                 'admin_state_up': True,
                 'fixed_ips': [{'subnet_id': fixed_ip['subnet_id']}]
             }
@@ -92,25 +93,24 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
             # rebind only if agents available
             return
 
-        mac_addresses = agents[0]['configurations'].get('device_macs', 0)
-
+        f5_hosts = agents[0]['configurations'].get('device_hosts', {})
         filter = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
-                  'device_id': mac_addresses,
+                  'device_id': [context.current['id']],
                   'binding:host_id': [context.host],
                   'fixed_ips': {'subnet_id': [fixed_ip['subnet_id']]}}
         selfips = context._plugin.get_ports(plugin_context, filter)
 
         # Create inital self-ips if missing for device
-        for mac_address in mac_addresses:
-            if mac_address not in [port['device_id'] for port in selfips]:
+        for host in f5_hosts.keys():
+            if host not in [port['description'] for port in selfips]:
                 # Create SelfIP Port for device
                 port_dict = self._make_selfip_dict(
-                    context.current, mac_address)
+                    context.current, context.current['id'], host)
                 selfips.append(
                     context._plugin.create_port(plugin_context, port_dict)
                 )
 
-        if len(context.current['allowed_address_pairs']) != len(mac_addresses):
+        if len(context.current['allowed_address_pairs']) != len(f5_hosts):
             # update allowed_address_pairs with self-ips
             subnet = self.get_subnet(plugin_context, fixed_ip['subnet_id'])
             port_update = {
@@ -119,7 +119,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                         {'ip_address': "{}/{}".format(
                             selfip['fixed_ips'][0]['ip_address'],
                             IPNetwork(subnet['cidr']).prefixlen
-                        ), 'mac_address': selfip['device_id']}
+                        ), 'mac_address': f5_hosts[selfip['description']]}
                         for selfip in selfips
                     ]
                 }
@@ -169,7 +169,10 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                 context.current['id'])
             return
 
-        self._ensure_selfips(context)
+        selfips = self._ensure_selfips(context)
+        LOG.debug("Created selfip ports %s for listener %s",
+                  [selfip.id for selfip in selfips],
+                  context.current['id'])
 
         provisioning_blocks.provisioning_complete(
             plugin_context, context.current['id'], resources.PORT,

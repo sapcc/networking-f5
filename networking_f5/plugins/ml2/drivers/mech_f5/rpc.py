@@ -58,7 +58,7 @@ class F5DORpcCallback(object):
                     'ip_address': port.fixed_ips[0].ip_address,
                     'network_id': port.network_id,
                     'tag': tag,
-                    'mac': port.device_id}})
+                    'host': port.description}})
             res['vlans'].update({port.network_id: {
                 'tag': tag,
                 'physical_network': physical_network}})
@@ -95,9 +95,9 @@ class F5DORpcCallback(object):
         ports = self.plugin.get_ports(context, filters)
 
         class ListenerContext(object):
-            def __init__(self, port, plugin, plugin_context, host):
+            def __init__(self, port, plugin, plugin_context, _host):
                 self.current = port
-                self.host = host
+                self.host = _host
                 self._plugin = plugin
                 self._plugin_context = plugin_context
 
@@ -111,3 +111,23 @@ class F5DORpcCallback(object):
             self.f5plugin._ensure_selfips(
                 ListenerContext(listener, self.plugin, context, host)
             )
+
+    def cleanup_selfips_for_agent(self, context, **kwargs):
+        host = kwargs.get('host')
+        LOG.debug('cleanup_selfips_for_agent from %s', host)
+
+        # Fetch all selfip ports for this host
+        filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
+                   'binding:host_id': [host]}
+        all_selfips = self.plugin.get_ports(context, filters, fields=['id', 'device_id'])
+
+        # try fetch all listener of the selfips
+        filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER],
+                   'binding:host_id': [host],
+                   'id': [port['device_id'] for port in all_selfips]}
+        listeners = [port['id'] for port in self.plugin.get_ports(context, filters, fields=['id'])]
+
+        for selfip in all_selfips:
+            if selfip['device_id'] not in listeners:
+                LOG.debug('Found orphaned selfip for %s: deleting %s', host, selfip['id'])
+                self.plugin.delete_port(context, selfip['id'])

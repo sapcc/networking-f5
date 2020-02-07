@@ -34,9 +34,9 @@ import abc
 import sys
 
 import eventlet
+
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
 eventlet.monkey_patch()
-
 
 LOG = logging.getLogger(__name__)
 
@@ -107,6 +107,10 @@ class F5Backend(object):
         """return device mac"""
 
     @abc.abstractmethod
+    def get_host(self):
+        """return device host"""
+
+    @abc.abstractmethod
     def plug_interface(self, network_segment, device):
         """plug interface"""
 
@@ -131,6 +135,11 @@ class F5DOPluginAPI(object):
     def ensure_selfips_for_agent(self, context, **kwargs):
         cctxt = self.client.prepare()
         return cctxt.call(context, 'ensure_selfips_for_agent',
+                          host=self.host, **kwargs)
+
+    def cleanup_selfips_for_agent(self, context, **kwargs):
+        cctxt = self.client.prepare()
+        return cctxt.call(context, 'cleanup_selfips_for_agent',
                           host=self.host, **kwargs)
 
 
@@ -180,7 +189,11 @@ class F5Manager(amb.CommonAgentManagerBase):
                 interval=sync_interval,
                 stop_on_exception=False)
 
-
+        self.cleanup = loopingcall.FixedIntervalLoopingCall(
+            self.plugin_rpc.cleanup_selfips_for_agent, self.ctx)
+        self.cleanup.start(
+            interval=30,
+            stop_on_exception=False)
 
     def _connect(self):
         self.devices = [driver.DriverManager(
@@ -212,7 +225,9 @@ class F5Manager(amb.CommonAgentManagerBase):
         return {
             'device_mappings': self.device_mappings,
             'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats,
-            'device_macs': [device.get_mac() for device in self.devices],
+            'device_hosts': {
+                device.get_host(): device.get_mac() for device in self.devices
+            },
         }
 
     def get_agent_id(self):
@@ -235,7 +250,7 @@ class F5Manager(amb.CommonAgentManagerBase):
                     key: val for key, val in res.get(
                         'selfips',
                         {}).items() if
-                    device.get_mac() == val.get('mac', None)
+                    device.get_host() == val.get('host', None)
                 })
 
         for vcmp in self.vcmps:
@@ -251,11 +266,11 @@ class F5Manager(amb.CommonAgentManagerBase):
         pass
 
     def plug_interface(
-        self,
-        network_id,
-        network_segment,
-        device,
-        device_owner):
+            self,
+            network_id,
+            network_segment,
+            device,
+            device_owner):
         LOG.debug("PLUG_INTERFACE: {}".format(device))
         return any([host.plug_interface(network_segment, device)
                     for host in self.devices])
