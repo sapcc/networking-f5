@@ -49,6 +49,11 @@ class F5DORpcCallback(object):
         res = collections.defaultdict(dict)
         subnet_mapping = collections.defaultdict(list)
         for port in query.all():
+            if not port.binding_levels:
+                LOG.warning("No bindings for port %s found, cannot configure F5 layer2 access.",
+                            port.id)
+                continue
+
             tag = port.binding_levels[-1].segment.segmentation_id
             physical_network = port.binding_levels[-1].segment.physical_network
             subnet_mapping[port.fixed_ips[0].subnet_id].append(port.id)
