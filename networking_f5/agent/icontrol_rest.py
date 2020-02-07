@@ -203,7 +203,7 @@ class F5iControlRestBackend(F5Backend):
 
         # New ones
         for name, selfip in prefixed_selfips.items():
-            if self.mac != selfip['mac']:
+            if self.device.hostname != selfip['host']:
                 continue
 
             self.mgmt.tm.net.selfips.selfip.create(

@@ -95,7 +95,6 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
 
         f5_hosts = agents[0]['configurations'].get('device_hosts', {})
         filter = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
-                  'device_id': [context.current['id']],
                   'binding:host_id': [context.host],
                   'fixed_ips': {'subnet_id': [fixed_ip['subnet_id']]}}
         selfips = context._plugin.get_ports(plugin_context, filter)

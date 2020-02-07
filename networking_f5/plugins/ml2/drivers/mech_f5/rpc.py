@@ -50,8 +50,9 @@ class F5DORpcCallback(object):
         subnet_mapping = collections.defaultdict(list)
         for port in query.all():
             if not port.binding_levels:
-                LOG.warning("No bindings for port %s found, cannot configure F5 layer2 access.",
-                            port.id)
+                LOG.warning("No bindings for port %s (network %s) found, "
+                            "cannot configure F5 layer2 access.",
+                            port.network_id, port.id)
                 continue
 
             tag = port.binding_levels[-1].segment.segmentation_id
