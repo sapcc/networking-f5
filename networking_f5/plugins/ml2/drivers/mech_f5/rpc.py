@@ -57,6 +57,11 @@ class F5DORpcCallback(object):
 
             tag = port.binding_levels[-1].segment.segmentation_id
             physical_network = port.binding_levels[-1].segment.physical_network
+            if not physical_network:
+                LOG.warning("No physical mapping of port %s for segment %s.",
+                            port.id, port.binding_levels[-1].segment)
+                continue
+
             subnet_mapping[port.fixed_ips[0].subnet_id].append(port.id)
 
             res['selfips'].update({
