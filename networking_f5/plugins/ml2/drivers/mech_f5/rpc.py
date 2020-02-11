@@ -55,12 +55,14 @@ class F5DORpcCallback(object):
                             port.network_id, port.id)
                 continue
 
-            tag = port.binding_levels[-1].segment.segmentation_id
-            physical_network = port.binding_levels[-1].segment.physical_network
-            if not physical_network:
-                LOG.warning("No physical mapping of port %s for segment %s.",
-                            port.id, port.binding_levels[-1].segment)
-                continue
+            segment = [binding_level.segment for binding_level in port.binding_levels
+                       if binding_level.level == 1 and binding_level.segment.network_type == 'vlan']
+            if not segment:
+                LOG.error("No valid binding level found for port %s", port.id)
+
+            tag = segment[0].segmentation_id
+            # expect level 1 to be the correct physical network
+            physical_network = segment[0].physical_network
 
             subnet_mapping[port.fixed_ips[0].subnet_id].append(port.id)
 
