@@ -21,7 +21,6 @@ from icontrol.exceptions import iControlUnexpectedHTTPError
 from oslo_log import log as logging
 from prometheus_client import Summary
 from requests import Timeout, ConnectionError
-from six.moves.urllib import parse
 from tenacity import retry_if_exception_type, \
     wait_incrementing, stop_after_attempt, retry
 

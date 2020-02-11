@@ -43,7 +43,7 @@ LOG = logging.getLogger(__name__)
 F5_OPTS = [
     cfg.StrOpt('backend',
                default='icontrol',
-               choices=['do', 'icontrol'],
+               choices=['do', 'icontrol', 'noop'],
                help=_('Backend driver for BigIP F5 communication')),
     cfg.FloatOpt('sync_interval', default=90,
                  help=_('Seconds between full sync.')),
