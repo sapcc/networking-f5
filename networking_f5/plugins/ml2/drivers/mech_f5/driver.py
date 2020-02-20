@@ -91,7 +91,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         agents = context.host_agents(constants.AGENT_TYPE_F5)
         if not agents:
             # rebind only if agents available
-            return
+            return []
 
         f5_hosts = agents[0]['configurations'].get('device_hosts', {})
         filter = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
@@ -129,6 +129,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                                                          port_update,
                                                          context.current,
                                                          context.current)
+        return selfips
 
     def create_port_postcommit(self, context):
         plugin_context = context._plugin_context
@@ -170,7 +171,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
 
         selfips = self._ensure_selfips(context)
         LOG.debug("Created selfip ports %s for listener %s",
-                  [selfip.id for selfip in selfips],
+                  [selfip['id'] for selfip in selfips],
                   context.current['id'])
 
         provisioning_blocks.provisioning_complete(
