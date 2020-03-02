@@ -72,7 +72,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
             'port': {
                 'tenant_id': listener_port['tenant_id'],
                 'binding:host_id': listener_port['binding:host_id'],
-                'name': 'self-ip-subnet-{}'.format(fixed_ip['subnet_id']),
+                'name': 'local-{}-{}'.format(description, fixed_ip['subnet_id']),
                 'network_id': listener_port['network_id'],
                 'device_owner': constants.DEVICE_OWNER_SELFIP,
                 'device_id': device_id,
