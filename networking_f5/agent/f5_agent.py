@@ -244,6 +244,7 @@ class F5Manager(amb.CommonAgentManagerBase):
     def _full_sync(self):
         res = self.plugin_rpc.get_selfips_and_vlans(self.ctx)
         for device in self.devices:
+            LOG.debug("Syncing F5 device %s", device.get_host())
             device.sync_all(
                 vlans=res.get('vlans', {}).copy(),
                 selfips={
@@ -254,6 +255,7 @@ class F5Manager(amb.CommonAgentManagerBase):
                 })
 
         for vcmp in self.vcmps:
+            LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
             vcmp.sync_vlan(res['vlans'].copy())
 
     def ensure_port_admin_state(self, device, admin_state_up):

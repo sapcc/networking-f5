@@ -58,6 +58,13 @@ class F5vCMPBackend(object):
             token=True
         )
 
+    def _unregister_vlan(self, vlan):
+        guest = self.mgmt.tm.vcmp.guests.guest.load(name=self.vcmp_guest)
+        new_vlans = [six.text_type(mgmt_vlan) for mgmt_vlan in guest.vlans
+                     if not mgmt_vlan.startswith('/Common/' + vlan.name)]
+        guest.vlans = new_vlans
+        guest.update()
+
     REQUEST_TIME_SYNC_VLAN = Summary(
         'sync_vcmp_vlans_seconds',
         'Time spent processing vcmp vlans')
@@ -79,7 +86,15 @@ class F5vCMPBackend(object):
 
             # Not managed by agent
             if not old_vlan.name.startswith(constants.PREFIX_VLAN):
-                pass
+                # Migration case from old agent
+                if old_vlan.tag in [vlan['tag'] for vlan in orig_vlans.values()]:
+                    self._unregister_vlan(old_vlan)
+                    try:
+                        old_vlan.delete()
+                    except iControlUnexpectedHTTPError:
+                        pass
+                else:
+                    pass
 
             # Update
             elif old_vlan.name in orig_vlans:
