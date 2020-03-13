@@ -78,26 +78,24 @@ class F5vCMPBackend(object):
     @REQUEST_TIME_SYNC_VLAN.time()
     def sync_vlan(self, vlans):
         v = self.mgmt.tm.net.vlans
-        orig_vlans = {
-            constants.PREFIX_VLAN +
-            name: val for name,
-            val in vlans.items()}
+        orig_vlans = {'{}{}'.format(constants.PREFIX_VLAN, val['tag']): val
+                      for val in vlans.values()}
         for old_vlan in v.get_collection():
 
-            # Not managed by agent
-            if not old_vlan.name.startswith(constants.PREFIX_VLAN):
-                # Migration case from old agent
-                if old_vlan.tag in [vlan['tag'] for vlan in orig_vlans.values()]:
-                    self._unregister_vlan(old_vlan)
-                    try:
-                        old_vlan.delete()
-                    except iControlUnexpectedHTTPError:
-                        pass
-                else:
+            # Migration case
+            if old_vlan.name.startswith('net-'):
+                self._unregister_vlan(old_vlan)
+                try:
+                    old_vlan.delete()
+                except iControlUnexpectedHTTPError:
                     pass
 
+            # Not supposed to be managed by agent
+            if not old_vlan.name.startswith(constants.PREFIX_VLAN):
+                continue
+
             # Update
-            elif old_vlan.name in orig_vlans:
+            if old_vlan.name in orig_vlans:
                 vlan = orig_vlans.pop(old_vlan.name)
                 if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
                     old_vlan.tag = vlan['tag']
@@ -133,14 +131,15 @@ class F5vCMPBackend(object):
         # Assign VLANs to the correct guest, but keep mgmt networks
         try:
             guest = self.mgmt.tm.vcmp.guests.guest.load(name=self.vcmp_guest)
-            new_vlans = map(u'/Common/net-{0}'.format, vlans.keys())
-            new_vlans.extend([six.text_type(mgmt_vlan)
+            expected = [u'/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])
+                        for vlan in vlans.values()]
+            expected.extend([six.text_type(mgmt_vlan)
                               for mgmt_vlan in guest.vlans
                               if not mgmt_vlan.startswith(
                               '/Common/' + constants.PREFIX_VLAN)])
             if collections.Counter(
-                new_vlans) != collections.Counter(guest.vlans):
-                guest.vlans = new_vlans
+                expected) != collections.Counter(guest.vlans):
+                guest.vlans = expected
                 guest.update()
         except iControlUnexpectedHTTPError as e:
             LOG.error("Failure configuring guest VLAN: %s", e)

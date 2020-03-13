@@ -118,7 +118,8 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                         {'ip_address': "{}/{}".format(
                             selfip['fixed_ips'][0]['ip_address'],
                             IPNetwork(subnet['cidr']).prefixlen
-                        ), 'mac_address': f5_hosts[selfip['description']]}
+                        ), 'mac_address': f5_hosts.get(selfip['description'],
+                                                       '00:00:00:00:00:00')}
                         for selfip in selfips
                     ]
                 }

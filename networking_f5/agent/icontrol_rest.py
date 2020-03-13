@@ -91,6 +91,19 @@ class F5iControlRestBackend(F5Backend):
     def get_host(self):
         return self.device.hostname
 
+    def is_active(self):
+        def get_device_name(bigip):
+            devices = bigip.tm.cm.devices.get_collection()
+            for device in devices:
+                if device.selfDevice == 'true':
+                    return device.name
+
+            return None
+
+        act = self.mgmt.tm.cm.devices.device.load(
+            name=get_device_name(self.mgmt), partition='Common')
+        return act.failoverState.lower() == 'active'
+
     @staticmethod
     def _prefix(collection, prefix, replace_hyphen=False):
         if replace_hyphen:
@@ -103,6 +116,13 @@ class F5iControlRestBackend(F5Backend):
             prefix + name: val
             for name, val
             in collection.items()
+        }
+
+    @staticmethod
+    def _prefix_vlans(collection):
+        return {
+            '{}{}'.format(constants.PREFIX_VLAN, val['tag']): val
+            for val in collection.values()
         }
 
     def try_delete_object(self, o_type, name):
@@ -120,9 +140,17 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
-        new_vlans = self._prefix(vlans, constants.PREFIX_VLAN)
+        print(vlans)
+        new_vlans = self._prefix_vlans(vlans)
         v = self.mgmt.tm.net.vlans
         for old_vlan in v.get_collection():
+            # Migration case
+            if old_vlan.name.startswith('net-'):
+                try:
+                    old_vlan.delete()
+                except iControlUnexpectedHTTPError:
+                    pass
+
             # Not managed by agent
             if not old_vlan.name.startswith(constants.PREFIX_VLAN):
                 pass
@@ -170,7 +198,7 @@ class F5iControlRestBackend(F5Backend):
         def get_vlan_path(selfip):
             return '/Common/{}{}'.format(
                 constants.PREFIX_VLAN,
-                selfip['network_id']
+                selfip['tag']
             )
 
         prefixed_selfips = self._prefix(
@@ -209,7 +237,7 @@ class F5iControlRestBackend(F5Backend):
             self.mgmt.tm.net.selfips.selfip.create(
                 name=name,
                 partition='Common',
-                vlan=constants.PREFIX_VLAN + selfip['network_id'],
+                vlan='{}{}'.format(constants.PREFIX_VLAN, selfip['tag']),
                 address=convert_ip(selfip),
             )
             PROM_INSTANCE.selfip_create.inc()
@@ -220,18 +248,17 @@ class F5iControlRestBackend(F5Backend):
 
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
-        prefixed_vlans = self._prefix(vlans, constants.PREFIX_VLAN)
+        prefixed_nets = self._prefix(vlans, constants.PREFIX_NET)
         rds = self.mgmt.tm.net.route_domains
         for rd in rds.get_collection():
             # Not managed by agent
-            if not rd.name.startswith(constants.PREFIX_VLAN):
+            if not rd.name.startswith(constants.PREFIX_NET):
                 pass
 
             # Update
-            elif rd.name in prefixed_vlans:
-                # TODO
-                vlan = prefixed_vlans.pop(rd.name)
-                vlans = ['/Common/{}'.format(rd.name)]
+            elif rd.name in prefixed_nets:
+                vlan = prefixed_nets.pop(rd.name)
+                vlans = ['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])]
                 if getattr(rd, 'vlans', []) != vlans or rd.id != vlan['tag']:
                     rd.vlans = vlans
                     rd.id = vlan['tag']
@@ -247,11 +274,11 @@ class F5iControlRestBackend(F5Backend):
                     pass
 
         # New ones
-        for name, vlan in prefixed_vlans.items():
+        for name, vlan in prefixed_nets.items():
             try:
                 rds.route_domain.create(
                     name=name, partition='Common', id=vlan['tag'],
-                    vlans=['/Common/{}'.format(name)])
+                    vlans=['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])])
                 PROM_INSTANCE.route_domain_create.inc()
             except iControlUnexpectedHTTPError:
                 # Try deleting selfip first and let it resync next time
@@ -320,11 +347,11 @@ class F5iControlRestBackend(F5Backend):
     @REQUEST_TIME_SYNC_PARTITIONS.time()
     def _sync_partitions(self, vlans):
         prefixed_vlans = self._prefix(vlans,
-            constants.PREFIX_VLAN, True)
+            constants.PREFIX_NET, True)
         partitions = self.mgmt.tm.auth.partitions
         for partition in partitions.get_collection():
             # Not managed by agent
-            if not partition.name.startswith(constants.PREFIX_VLAN.replace('-', '_')):
+            if not partition.name.startswith(constants.PREFIX_NET.replace('-', '_')):
                 pass
 
             # Update
