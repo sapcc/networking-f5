@@ -265,7 +265,7 @@ class F5Manager(amb.CommonAgentManagerBase):
                         {}).items() if
                     device.get_host() == val.get('host', None)
                 })
-        """
+
         for vcmp in self.vcmps:
             if cfg.CONF.F5.migration:
                 active_devices = [device.device.hostname for device in self.devices
@@ -275,7 +275,7 @@ class F5Manager(amb.CommonAgentManagerBase):
                     continue
             LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
             vcmp.sync_vlan(res['vlans'].copy())
-        """
+
     def ensure_port_admin_state(self, device, admin_state_up):
         pass
 
