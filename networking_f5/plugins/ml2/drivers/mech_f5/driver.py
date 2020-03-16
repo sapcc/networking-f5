@@ -25,8 +25,16 @@ from neutron.plugins.ml2.drivers import mech_agent
 from neutron_lib import constants as p_constants
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.callbacks import resources
+from oslo_config import cfg
 
 LOG = log.getLogger(__name__)
+
+CONF = cfg.CONF
+CONF.register_opts([
+    cfg.StrOpt('selfip_project_id',
+               default='',
+               help="(optional) keystone project name for self-ips")
+], 'F5_DRIVER')
 
 
 class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
@@ -70,7 +78,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         fixed_ip = listener_port['fixed_ips'][0]
         return {
             'port': {
-                'tenant_id': listener_port['tenant_id'],
+                'tenant_id': CONF.F5_DRIVER.selfip_project_id or listener_port['tenant_id'],
                 'binding:host_id': listener_port['binding:host_id'],
                 'name': 'local-{}-{}'.format(description, fixed_ip['subnet_id']),
                 'network_id': listener_port['network_id'],
