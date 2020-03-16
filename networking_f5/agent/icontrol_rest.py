@@ -150,6 +150,7 @@ class F5iControlRestBackend(F5Backend):
                     old_vlan.delete()
                 except iControlUnexpectedHTTPError:
                     pass
+                continue
 
             # Not managed by agent
             if not old_vlan.name.startswith(constants.PREFIX_VLAN):
