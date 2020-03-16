@@ -89,6 +89,7 @@ class F5vCMPBackend(object):
                     old_vlan.delete()
                 except iControlUnexpectedHTTPError:
                     pass
+                continue
 
             # Not supposed to be managed by agent
             if not old_vlan.name.startswith(constants.PREFIX_VLAN):
