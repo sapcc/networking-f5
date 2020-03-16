@@ -112,7 +112,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
             if host not in [port['description'] for port in selfips]:
                 # Create SelfIP Port for device
                 port_dict = self._make_selfip_dict(
-                    context.current, context.current['id'], host)
+                    context.current, fixed_ip['subnet_id'], host)
                 selfips.append(
                     context._plugin.create_port(plugin_context, port_dict)
                 )
