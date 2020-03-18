@@ -389,31 +389,31 @@ class F5iControlRestBackend(F5Backend):
     @SYNC_ALL_EXCEPTIONS.count_exceptions()
     def sync_all(self, vlans, selfips):
         try:
-            LOG.debug("Syncing vlans %d", len(vlans))
+            LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
             self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing routedomains %d", len(vlans))
+            LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
             self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing partitions %d", len(vlans))
+            LOG.debug("Syncing partitions %s", [partition for partition in vlans.keys()])
             self._sync_partitions(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing selfips %d", len(selfips))
+            LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in selfips.values()])
             self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing routes %s", vlans)
+            LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()])
             self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
