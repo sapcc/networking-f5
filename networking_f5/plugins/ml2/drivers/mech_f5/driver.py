@@ -117,22 +117,17 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                     context._plugin.create_port(plugin_context, port_dict)
                 )
 
-        if len(context.current['allowed_address_pairs']) != len(f5_hosts):
+        # Update allowed address pairs if needed
+        subnet = self.get_subnet(plugin_context, fixed_ip['subnet_id'])
+        allowed_address_pairs = [
+            {'ip_address': "{}/{}".format(
+                selfip['fixed_ips'][0]['ip_address'], IPNetwork(subnet['cidr']).prefixlen
+            ), 'mac_address': f5_hosts.get(selfip['description'], '00:00:00:00:00:00')}
+            for selfip in selfips
+        ]
+        if context.current['allowed_address_pairs'] != allowed_address_pairs:
             # update allowed_address_pairs with self-ips
-            subnet = self.get_subnet(plugin_context, fixed_ip['subnet_id'])
-            port_update = {
-                'port': {
-                    'allowed_address_pairs': [
-                        {'ip_address': "{}/{}".format(
-                            selfip['fixed_ips'][0]['ip_address'],
-                            IPNetwork(subnet['cidr']).prefixlen
-                        ), 'mac_address': f5_hosts.get(selfip['description'],
-                                                       '00:00:00:00:00:00')}
-                        for selfip in selfips
-                    ]
-                }
-            }
-
+            port_update = {'port': {'allowed_address_pairs': allowed_address_pairs}}
             context._plugin.update_address_pairs_on_port(plugin_context,
                                                          context.current['id'],
                                                          port_update,
