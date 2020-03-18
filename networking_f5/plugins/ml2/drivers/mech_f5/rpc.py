@@ -134,13 +134,14 @@ class F5DORpcCallback(object):
                    'binding:host_id': [host]}
         all_selfips = self.plugin.get_ports(context, filters, fields=['id', 'device_id'])
 
-        # try fetch all listener of the selfips
+        # try find listener of the selfips
         filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER],
                    'binding:host_id': [host],
-                   'id': [port['device_id'] for port in all_selfips]}
-        listeners = [port['id'] for port in self.plugin.get_ports(context, filters, fields=['id'])]
+                   'fixed_ips': {'subnet_id': [selfip['device_id'] for selfip in all_selfips]}}
+        listener_subnets = [port['fixed_ips'][0]['subnet_id'] for port in
+                            self.plugin.get_ports(context, filters, fields=['fixed_ips'])]
 
         for selfip in all_selfips:
-            if selfip['device_id'] not in listeners:
+            if selfip['device_id'] not in listener_subnets:
                 LOG.debug('Found orphaned selfip for %s: deleting %s', host, selfip['id'])
                 self.plugin.delete_port(context, selfip['id'])
