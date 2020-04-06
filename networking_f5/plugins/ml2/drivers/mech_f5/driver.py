@@ -135,7 +135,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                                                          context.current)
         return selfips
 
-    def create_port_postcommit(self, context):
+    def update_port_postcommit(self, context):
         plugin_context = context._plugin_context
 
         # skip Self-IP
