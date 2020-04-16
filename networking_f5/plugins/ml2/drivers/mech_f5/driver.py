@@ -53,7 +53,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         raise NotImplementedError()
 
     def start_rpc_listeners(self):
-        conn = rpc.create_connection()
+        conn = rpc.Connection()
         conn.create_consumer(constants.TOPIC,
                              [F5DORpcCallback(self)],
                              fanout=False)
