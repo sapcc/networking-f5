@@ -13,19 +13,19 @@
 # under the License.
 
 from netaddr import IPNetwork
+from neutron_lib import constants as p_constants
+from neutron_lib import rpc
+from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import resources
+from oslo_config import cfg
 from oslo_log import log
 
 from networking_f5 import constants
 from networking_f5.plugins.ml2.drivers.mech_f5.rpc import F5DORpcCallback
 from neutron import service
-from neutron.common import rpc
 from neutron.db import db_base_plugin_v2
 from neutron.db import provisioning_blocks
 from neutron.plugins.ml2.drivers import mech_agent
-from neutron_lib import constants as p_constants
-from neutron_lib.api.definitions import portbindings
-from neutron_lib.callbacks import resources
-from oslo_config import cfg
 
 LOG = log.getLogger(__name__)
 

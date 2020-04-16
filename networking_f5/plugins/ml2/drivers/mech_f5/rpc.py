@@ -16,10 +16,10 @@ import collections
 
 import oslo_messaging
 from netaddr import IPNetwork
+from neutron_lib.plugins import directory
 from oslo_log import log as logging
 
 from networking_f5 import constants
-from neutron_lib.plugins import directory
 
 LOG = logging.getLogger(__name__)
 
