@@ -108,7 +108,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         selfips = context._plugin.get_ports(plugin_context, filter)
 
         # Create inital self-ips if missing for device
-        for host in f5_hosts.keys():
+        for host in list(f5_hosts.keys()):
             if host not in [port['description'] for port in selfips]:
                 # Create SelfIP Port for device
                 port_dict = self._make_selfip_dict(

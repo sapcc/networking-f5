@@ -76,8 +76,11 @@ class F5DORpcCallback(object):
                 'tag': tag,
                 'physical_network': physical_network}})
 
+        # Freeze defaultdict
+        subnet_mapping.default_factory = None
+
         # Update correct cidr prefix
-        filters = {'id': subnet_mapping.keys()}
+        filters = {'id': list(subnet_mapping.keys())}
         subnets = self.plugin.get_subnets(
             context, filters, fields=['cidr', 'id', 'gateway_ip'])
         for subnet in subnets:
@@ -90,7 +93,7 @@ class F5DORpcCallback(object):
                 })
 
         # Update correct MTU values
-        filters = {'id': res['vlans'].keys()}
+        filters = {'id': list(res['vlans'].keys())}
         networks = self.plugin.get_networks(
             context, filters, fields=['mtu', 'id'])
         for network in networks:

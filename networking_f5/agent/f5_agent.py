@@ -218,7 +218,7 @@ class F5Manager(amb.CommonAgentManagerBase):
                 host,
                 guest
             ) for host, guest in
-                self.conf.F5_VCMP.hosts_guest_mappings.items()]
+                list(self.conf.F5_VCMP.hosts_guest_mappings.items())]
 
     def get_all_devices(self):
         all_devices = set()
@@ -261,9 +261,9 @@ class F5Manager(amb.CommonAgentManagerBase):
             device.sync_all(
                 vlans=res.get('vlans', {}).copy(),
                 selfips={
-                    key: val for key, val in res.get(
+                    key: val for key, val in list(res.get(
                         'selfips',
-                        {}).items() if
+                        {}).items()) if
                     device.get_host() == val.get('host', None)
                 })
 

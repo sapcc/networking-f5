@@ -79,7 +79,7 @@ class F5vCMPBackend(object):
     def sync_vlan(self, vlans):
         v = self.mgmt.tm.net.vlans
         orig_vlans = {'{}{}'.format(constants.PREFIX_VLAN, val['tag']): val
-                      for val in vlans.values()}
+                      for val in list(vlans.values())}
         for old_vlan in v.get_collection():
 
             # Migration case
@@ -119,7 +119,7 @@ class F5vCMPBackend(object):
                     pass
 
         # New ones
-        for name, vlan in orig_vlans.items():
+        for name, vlan in list(orig_vlans.items()):
             new_vlan = v.vlan.create(name=name,
                                      partition='Common',
                                      tag=vlan['tag'], mtu=vlan['mtu'],
@@ -132,8 +132,8 @@ class F5vCMPBackend(object):
         # Assign VLANs to the correct guest, but keep mgmt networks
         try:
             guest = self.mgmt.tm.vcmp.guests.guest.load(name=self.vcmp_guest)
-            expected = [u'/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])
-                        for vlan in vlans.values()]
+            expected = ['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])
+                        for vlan in list(vlans.values())]
             expected.extend([six.text_type(mgmt_vlan)
                               for mgmt_vlan in guest.vlans
                               if not mgmt_vlan.startswith(

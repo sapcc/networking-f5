@@ -80,7 +80,7 @@ class F5iControlRestBackend(F5Backend):
             verify=self.conf.F5.https_verify
         )
 
-        for interface in self.device_mappings.values():
+        for interface in list(self.device_mappings.values()):
             if self.mgmt.tm.net.trunks.trunk.exists(name=interface):
                 trunk = self.mgmt.tm.net.trunks.trunk.load(name=interface)
                 self.mac = trunk.macAddress
@@ -111,19 +111,19 @@ class F5iControlRestBackend(F5Backend):
             return {
                 (prefix + name).replace('-', '_'): val
                 for name, val
-                in collection.items()
+                in list(collection.items())
             }
         return {
             prefix + name: val
             for name, val
-            in collection.items()
+            in list(collection.items())
         }
 
     @staticmethod
     def _prefix_vlans(collection):
         return {
             '{}{}'.format(constants.PREFIX_VLAN, val['tag']): val
-            for val in collection.values()
+            for val in list(collection.values())
         }
 
     def try_delete_object(self, o_type, name):
@@ -175,7 +175,7 @@ class F5iControlRestBackend(F5Backend):
                     pass
 
         # New ones
-        for name, vlan in new_vlans.items():
+        for name, vlan in list(new_vlans.items()):
             v.vlan.create(name=name, partition='Common',
                           tag=vlan['tag'], mtu=vlan['mtu'])
             PROM_INSTANCE.vlan_create.inc()
@@ -232,7 +232,7 @@ class F5iControlRestBackend(F5Backend):
                     self.try_delete_object('route', old_sip.name)
 
         # New ones
-        for name, selfip in prefixed_selfips.items():
+        for name, selfip in list(prefixed_selfips.items()):
             if self.device.hostname != selfip['host']:
                 continue
 
@@ -276,7 +276,7 @@ class F5iControlRestBackend(F5Backend):
                     pass
 
         # New ones
-        for name, vlan in prefixed_nets.items():
+        for name, vlan in list(prefixed_nets.items()):
             try:
                 rds.route_domain.create(
                     name=name, partition='Common', id=vlan['tag'],
@@ -297,10 +297,10 @@ class F5iControlRestBackend(F5Backend):
 
         # We only need one route per network, remove larger gateway IPs
         tmp = defaultdict(list)
-        for val in prefixed_selfips.values():
+        for val in list(prefixed_selfips.values()):
             tmp[val['network_id']].append(int(netaddr.IPAddress(val['gateway_ip'])))
 
-        prefixed_selfips = dict((key, val) for key, val in prefixed_selfips.items()
+        prefixed_selfips = dict((key, val) for key, val in list(prefixed_selfips.items())
                                 if int(netaddr.IPAddress(val['gateway_ip'])) == min(tmp[val['network_id']]))
 
         routes = self.mgmt.tm.net.routes
@@ -332,7 +332,7 @@ class F5iControlRestBackend(F5Backend):
                     pass
 
         # New ones
-        for name, selfip in prefixed_selfips.items():
+        for name, selfip in list(prefixed_selfips.items()):
             gateway = '{}%{}'.format(
                 selfip['gateway_ip'],
                 selfip['tag']
@@ -371,7 +371,7 @@ class F5iControlRestBackend(F5Backend):
                     pass
 
         # New ones
-        for name, vlan in prefixed_vlans.items():
+        for name, vlan in list(prefixed_vlans.items()):
             partitions.partition.create(
                 name=name, defaultRouteDomain=vlan['tag'],
                 description='Network {}'.format(name)
@@ -390,31 +390,31 @@ class F5iControlRestBackend(F5Backend):
     @SYNC_ALL_EXCEPTIONS.count_exceptions()
     def sync_all(self, vlans, selfips):
         try:
-            LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
+            LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in list(vlans.values())])
             self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
+            LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in list(vlans.values())])
             self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing partitions %s", [partition for partition in vlans.keys()])
+            LOG.debug("Syncing partitions %s", [partition for partition in list(vlans.keys())])
             self._sync_partitions(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in selfips.values()])
+            LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in list(selfips.values())])
             self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()])
+            LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in list(selfips.values())])
             self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
