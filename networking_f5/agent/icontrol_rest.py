@@ -11,6 +11,7 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
+
 import sys
 from collections import defaultdict
 
@@ -73,7 +74,7 @@ class F5iControlRestBackend(F5Backend):
             verify=self.conf.F5.https_verify
         )
 
-        for interface in self.device_mappings.values():
+        for interface in list(self.device_mappings.values()):
             if self.mgmt.tm.net.trunks.trunk.exists(name=interface):
                 trunk = self.mgmt.tm.net.trunks.trunk.load(name=interface)
                 self.mac = trunk.macAddress
@@ -106,19 +107,19 @@ class F5iControlRestBackend(F5Backend):
             return {
                 (prefix + name).replace('-', '_'): val
                 for name, val
-                in collection.items()
+                in list(collection.items())
             }
         return {
             prefix + name: val
             for name, val
-            in collection.items()
+            in list(collection.items())
         }
 
     @staticmethod
     def _prefix_vlans(collection):
         return {
             '{}{}'.format(constants.PREFIX_VLAN, val['tag']): val
-            for val in collection.values()
+            for val in list(collection.values())
         }
 
     def delete_object(self, o_type, name):
@@ -277,7 +278,7 @@ class F5iControlRestBackend(F5Backend):
                 LOG.exception(e)
 
         # New ones
-        for name, vlan in prefixed_nets.items():
+        for name, vlan in list(prefixed_nets.items()):
             try:
                 PROM_ACTION.labels(type='routedomain', action='create').inc()
                 rds.route_domain.create(

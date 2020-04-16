@@ -19,6 +19,11 @@ import time
 import eventlet
 import oslo_messaging
 import six
+from neutron_lib import constants as n_const
+from neutron_lib import context
+from neutron_lib import rpc as n_rpc
+from neutron_lib.agent import topics
+from neutron_lib.utils import helpers
 from oslo_concurrency import lockutils
 from oslo_concurrency import watchdog
 from oslo_config import cfg
@@ -32,12 +37,7 @@ from networking_f5._i18n import _
 from networking_f5.agent.vcmp import F5vCMPBackend
 from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
-from neutron.common import rpc as n_rpc
-from neutron.common import topics
 from neutron.conf.agent import common as agent_config
-from neutron_lib import constants as n_const
-from neutron_lib import context
-from neutron_lib.utils import helpers
 
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
 eventlet.monkey_patch()

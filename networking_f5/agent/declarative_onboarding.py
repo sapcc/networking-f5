@@ -89,14 +89,14 @@ class F5DeclarativeOnboardingBackend(F5Backend):
 
     @staticmethod
     def _construct_vlans(do, vlans):
-        for vlan, val in vlans.items():
+        for vlan, val in list(vlans.items()):
             do['Common'][vlan] = VLAN.copy()
             do['Common'][vlan]['tag'] = val['tag']
             do['Common'][vlan]['mtu'] = val['mtu']
 
     @staticmethod
     def _construct_selfips(do, selfips):
-        for selfip, val in selfips.items():
+        for selfip, val in list(selfips.items()):
             do['Common'][selfip] = SELFIP.copy()
             do['Common'][selfip]['address'] = val['ip_address']
             do['Common'][selfip]['vlan'] = val['vlan']
