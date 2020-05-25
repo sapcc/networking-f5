@@ -341,41 +341,6 @@ class F5iControlRestBackend(F5Backend):
                 name=name, partition='Common')
             PROM_INSTANCE.route_create.inc()
 
-    REQUEST_TIME_SYNC_PARTITIONS = Summary(
-        'sync_partitions_seconds',
-        'Time spent processing partitions')
-
-    @REQUEST_TIME_SYNC_PARTITIONS.time()
-    def _sync_partitions(self, vlans):
-        prefixed_vlans = self._prefix(vlans,
-            constants.PREFIX_NET, True)
-        partitions = self.mgmt.tm.auth.partitions
-        for partition in partitions.get_collection():
-            # Not managed by agent
-            if not partition.name.startswith(constants.PREFIX_NET.replace('-', '_')):
-                pass
-
-            # Update
-            elif partition.name in prefixed_vlans:
-                vlan = prefixed_vlans.pop(partition.name)
-                if partition.defaultRouteDomain != vlan['tag']:
-                    partition.defaultRouteDomain = vlan['tag']
-                    partition.update()
-
-            # orphaned
-            else:
-                try:
-                    partition.delete()
-                except iControlUnexpectedHTTPError:
-                    pass
-
-        # New ones
-        for name, vlan in prefixed_vlans.items():
-            partitions.partition.create(
-                name=name, defaultRouteDomain=vlan['tag'],
-                description='Network {}'.format(name)
-            )
-
     SYNC_ALL_EXCEPTIONS = Counter(
         'sync_exceptions',
         'Exceptions during sync_all')
@@ -397,12 +362,6 @@ class F5iControlRestBackend(F5Backend):
         try:
             LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
             self._sync_routedomains(vlans)
-        except iControlUnexpectedHTTPError as e:
-            LOG.exception(e)
-
-        try:
-            LOG.debug("Syncing partitions %s", [partition for partition in vlans.keys()])
-            self._sync_partitions(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
