@@ -385,16 +385,11 @@ class F5iControlRestBackend(F5Backend):
         # wait till sync-loop processed the port
         return False
 
-    GET_DEVICES_EXCEPTIONS = Counter(
-        'get_devices_exceptions',
-        'Exceptions during get_devices')
-
     @retry(
         retry=retry_if_exception_type((Timeout, ConnectionError)),
         wait=wait_incrementing(
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)
     )
-    @GET_DEVICES_EXCEPTIONS.count_exceptions()
     def get_devices(self):
         return self.devices
