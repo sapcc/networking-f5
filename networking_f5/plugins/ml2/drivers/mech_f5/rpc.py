@@ -56,7 +56,7 @@ class F5DORpcCallback(object):
                 continue
 
             segment = [binding_level.segment for binding_level in port.binding_levels
-                       if binding_level.level == 1 and binding_level.segment.network_type == 'vlan']
+                       if binding_level.segment.network_type == 'vlan']
             if not segment:
                 LOG.error("No valid binding level found for port %s", port.id)
 
@@ -127,7 +127,8 @@ class F5DORpcCallback(object):
 
     def cleanup_selfips_for_agent(self, context, **kwargs):
         host = kwargs.get('host')
-        LOG.debug('cleanup_selfips_for_agent from %s', host)
+        dry_run = kwargs.get('dry_run', True)
+        LOG.debug('cleanup_selfips_for_agent (dry_run=%s) from %s', dry_run, host)
 
         # Fetch all selfip ports for this host
         filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
@@ -144,4 +145,5 @@ class F5DORpcCallback(object):
         for selfip in all_selfips:
             if selfip['device_id'] not in listener_subnets:
                 LOG.debug('Found orphaned selfip for %s: deleting %s', host, selfip['id'])
-                self.plugin.delete_port(context, selfip['id'])
+                if not dry_run:
+                    self.plugin.delete_port(context, selfip['id'])

@@ -62,7 +62,10 @@ F5_OPTS = [
                 help=_("Enable prometheus metrics exporter")),
     cfg.BoolOpt('migration',
                 default=False,
-                help=_("Enable migration mode (disable syncing active devices)"))
+                help=_("Enable migration mode (disable syncing active devices)")),
+    cfg.BoolOpt('cleanup',
+                default=False,
+                help=_("Enable automatic cleanup of selfips (else dry-run)"))
 ]
 
 F5_VMCP_OPTS = [
@@ -197,9 +200,10 @@ class F5Manager(amb.CommonAgentManagerBase):
                 stop_on_exception=False)
 
         self.cleanup = loopingcall.FixedIntervalLoopingCall(
-            self.plugin_rpc.cleanup_selfips_for_agent, self.ctx)
+            self.plugin_rpc.cleanup_selfips_for_agent, self.ctx,
+            dry_run=not self.conf.F5.cleanup)
         self.cleanup.start(
-            interval=30,
+            interval=600,
             stop_on_exception=False)
 
     def _connect(self):
