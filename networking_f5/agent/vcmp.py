@@ -111,12 +111,17 @@ class F5vCMPBackend(object):
                         name=self.mappings[vlan['physical_network']],
                         tagMode='service')
 
-            # orphaned, try to delete but could be used by another vcmp guest
+            # If unused, it's probably orphaned
             else:
-                try:
-                    old_vlan.delete()
-                except iControlUnexpectedHTTPError:
-                    pass
+                used = False
+                for guest in self.mgmt.tm.vcmp.guests.get_collection():
+                    if old_vlan.fullPath in guest.vlans:
+                        used = True
+                if not used:
+                    try:
+                        old_vlan.delete()
+                    except iControlUnexpectedHTTPError:
+                        pass
 
         # New ones
         for name, vlan in orig_vlans.items():
