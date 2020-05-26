@@ -11,6 +11,7 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
+import re
 
 from netaddr import IPNetwork
 from oslo_log import log
@@ -101,15 +102,31 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
             # rebind only if agents available
             return []
 
-        f5_hosts = agents[0]['configurations'].get('device_hosts', {})
-        filter = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
+        filter = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
+                                   constants.DEVICE_OWNER_LEGACY],
                   'binding:host_id': [context.host],
                   'fixed_ips': {'subnet_id': [fixed_ip['subnet_id']]}}
         selfips = context._plugin.get_ports(plugin_context, filter)
 
+        selfip_hosts = set()
+        for selfip in list(selfips):
+            if selfip['device_owner'] == constants.DEVICE_OWNER_SELFIP:
+                # Modern selfip port
+                selfip_hosts.add(selfip['description'])
+            elif selfip['device_owner'] == constants.DEVICE_OWNER_LEGACY:
+                # legacy selfip port
+                m = re.match('local-(.*)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+                             selfip.get('name', ''))
+                if m:
+                    selfip_hosts.add(m.group(1))
+                else:
+                    # Not a correct selfip, remove from original list
+                    selfips.remove(selfip)
+
         # Create inital self-ips if missing for device
+        f5_hosts = agents[0]['configurations'].get('device_hosts', {})
         for host in f5_hosts.keys():
-            if host not in [port['description'] for port in selfips]:
+            if host not in selfip_hosts:
                 # Create SelfIP Port for device
                 port_dict = self._make_selfip_dict(
                     context.current, fixed_ip['subnet_id'], host)

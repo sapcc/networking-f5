@@ -13,7 +13,7 @@
 # under the License.
 
 import collections
-
+import re
 import oslo_messaging
 from netaddr import IPNetwork
 from oslo_log import log as logging
@@ -38,17 +38,28 @@ class F5DORpcCallback(object):
         return self._plugin
 
     def get_selfips_and_vlans(self, context, **kwargs):
-        host = kwargs.get('host')
+        host = kwargs.pop('host')
         LOG.debug('get_selfips_and_vlans from %s', host)
 
         # Fetch all Self-IPs for this agent
-        filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
+        filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
+                                    constants.DEVICE_OWNER_LEGACY],
                    'binding:host_id': [host]}
         query = self.plugin._get_ports_query(context, filters=filters)
 
         res = collections.defaultdict(dict)
         subnet_mapping = collections.defaultdict(list)
         for port in query.all():
+            device = port.description
+
+            if port.device_owner == constants.DEVICE_OWNER_LEGACY:
+                # Skip legacy VIP ports
+                m = re.match('local-(.*)-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}',
+                             port.name)
+                if not m:
+                    continue
+                device = m.group(1)
+
             if not port.binding_levels:
                 LOG.warning("No bindings for port %s (network %s) found, "
                             "cannot configure F5 layer2 access.",
@@ -59,6 +70,7 @@ class F5DORpcCallback(object):
                        if binding_level.segment.network_type == 'vlan']
             if not segment:
                 LOG.error("No valid binding level found for port %s", port.id)
+                continue
 
             tag = segment[0].segmentation_id
             # expect level 1 to be the correct physical network
@@ -71,7 +83,7 @@ class F5DORpcCallback(object):
                     'ip_address': port.fixed_ips[0].ip_address,
                     'network_id': port.network_id,
                     'tag': tag,
-                    'host': port.description}})
+                    'host': device}})
             res['vlans'].update({port.network_id: {
                 'tag': tag,
                 'physical_network': physical_network}})
@@ -103,7 +115,8 @@ class F5DORpcCallback(object):
         LOG.debug('ensure_selfips_for_agent from %s', host)
 
         # Fetch all listener ports for this host
-        filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER],
+        filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER,
+                                    constants.DEVICE_OWNER_LEGACY],
                    'binding:host_id': [host]}
         ports = self.plugin.get_ports(context, filters)
 
@@ -121,6 +134,11 @@ class F5DORpcCallback(object):
                              'host': [self.host]})
 
         for listener in ports:
+            if listener['device_owner'] == constants.DEVICE_OWNER_LEGACY:
+                # Skip legacy SelfIP ports, we're looking for VIP ports
+                if not listener.get('name', '').startswith('loadbalancer-'):
+                    continue
+
             self.f5plugin._ensure_selfips(
                 ListenerContext(listener, self.plugin, context, host)
             )
@@ -131,19 +149,27 @@ class F5DORpcCallback(object):
         LOG.debug('cleanup_selfips_for_agent (dry_run=%s) from %s', dry_run, host)
 
         # Fetch all selfip ports for this host
-        filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP],
+        filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
+                                    constants.DEVICE_OWNER_LEGACY],
                    'binding:host_id': [host]}
-        all_selfips = self.plugin.get_ports(context, filters, fields=['id', 'device_id'])
+
+        # special handling for legacy selfips
+        all_selfips = [selfip for selfip
+                       in self.plugin.get_ports(context, filters, fields=['id', 'device_owner', 'fixed_ips', 'name'])
+                       if not ((selfip['device_owner'] == constants.DEVICE_OWNER_LEGACY)
+                               and selfip['name'].startswith('loadbalancer-'))]
 
         # try find listener of the selfips
-        filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER],
+        filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER,
+                                    constants.DEVICE_OWNER_LEGACY],
                    'binding:host_id': [host],
-                   'fixed_ips': {'subnet_id': [selfip['device_id'] for selfip in all_selfips]}}
-        listener_subnets = [port['fixed_ips'][0]['subnet_id'] for port in
-                            self.plugin.get_ports(context, filters, fields=['fixed_ips'])]
+                   'fixed_ips': {'subnet_id': [selfip['fixed_ips'][0]['subnet_id'] for selfip in all_selfips]}}
+        listener_subnets = set([port['fixed_ips'][0]['subnet_id'] for port in
+                            self.plugin.get_ports(context, filters, fields=['fixed_ips', 'name'])
+                            if not port.get('name', '').startswith('local-')])
 
         for selfip in all_selfips:
-            if selfip['device_id'] not in listener_subnets:
+            if selfip['fixed_ips'][0]['subnet_id'] not in listener_subnets:
                 LOG.debug('Found orphaned selfip for %s: deleting %s', host, selfip['id'])
                 if not dry_run:
                     self.plugin.delete_port(context, selfip['id'])
