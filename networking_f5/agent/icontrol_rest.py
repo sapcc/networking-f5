@@ -162,6 +162,7 @@ class F5iControlRestBackend(F5Backend):
                 if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
                     old_vlan.tag = vlan['tag']
                     old_vlan.mtu = vlan['mtu']
+                    old_vlan.hardwareSynccokie = 'enabled'
                     old_vlan.update()
                     PROM_INSTANCE.vlan_update.inc()
 
