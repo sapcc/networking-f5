@@ -89,6 +89,8 @@ class F5iControlRestBackend(F5Backend):
         return self.mac
 
     def get_host(self):
+        if self.conf.F5.override_hostname:
+            return self.conf.F5.override_hostname
         return self.device.hostname
 
     def is_active(self):
@@ -162,7 +164,7 @@ class F5iControlRestBackend(F5Backend):
                 if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
                     old_vlan.tag = vlan['tag']
                     old_vlan.mtu = vlan['mtu']
-                    old_vlan.hardwareSynccokie = 'enabled'
+                    old_vlan.hardwareSyncookie = 'enabled'
                     old_vlan.update()
                     PROM_INSTANCE.vlan_update.inc()
 
@@ -176,7 +178,7 @@ class F5iControlRestBackend(F5Backend):
 
         # New ones
         for name, vlan in new_vlans.items():
-            v.vlan.create(name=name, partition='Common',
+            v.vlan.create(name=name, partition='Common', hardwareSyncookie='enabled',
                           tag=vlan['tag'], mtu=vlan['mtu'])
             PROM_INSTANCE.vlan_create.inc()
 
@@ -233,7 +235,7 @@ class F5iControlRestBackend(F5Backend):
 
         # New ones
         for name, selfip in prefixed_selfips.items():
-            if self.device.hostname != selfip['host']:
+            if self.get_host() != selfip['host']:
                 continue
 
             self.mgmt.tm.net.selfips.selfip.create(

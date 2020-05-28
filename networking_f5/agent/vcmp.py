@@ -101,7 +101,7 @@ class F5vCMPBackend(object):
                 if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
                     old_vlan.tag = vlan['tag']
                     old_vlan.mtu = vlan['mtu']
-                    old_vlan.hardwareSynccokie = 'enabled'
+                    old_vlan.hardwareSyncookie = 'enabled'
                     old_vlan.update()
 
                 if not old_vlan.interfaces_s.interfaces.exists(
@@ -128,7 +128,7 @@ class F5vCMPBackend(object):
             new_vlan = v.vlan.create(name=name,
                                      partition='Common',
                                      tag=vlan['tag'], mtu=vlan['mtu'],
-                                     hardwareSynccookie='enabled')
+                                     hardwareSyncookie='enabled')
             new_vlan.interfaces_s.interfaces.create(
                 tagged=True,
                 name=self.mappings[vlan['physical_network']],

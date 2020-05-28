@@ -65,7 +65,10 @@ F5_OPTS = [
                 help=_("Enable migration mode (disable syncing active devices)")),
     cfg.BoolOpt('cleanup',
                 default=False,
-                help=_("Enable automatic cleanup of selfips (else dry-run)"))
+                help=_("Enable automatic cleanup of selfips (else dry-run)")),
+    cfg.StrOpt('override_hostname',
+               default=None,
+               help=_('Override hostname')),
 ]
 
 F5_VMCP_OPTS = [
