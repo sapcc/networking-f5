@@ -146,7 +146,7 @@ class F5DORpcCallback(object):
     def cleanup_selfips_for_agent(self, context, **kwargs):
         host = kwargs.get('host')
         dry_run = kwargs.get('dry_run', True)
-        LOG.debug('cleanup_selfips_for_agent (dry_run=%s) from %s', dry_run, host)
+        LOG.info('cleanup_selfips_for_agent (dry_run=%s) from %s', dry_run, host)
 
         # Fetch all selfip ports for this host
         filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
@@ -170,6 +170,6 @@ class F5DORpcCallback(object):
 
         for selfip in all_selfips:
             if selfip['fixed_ips'][0]['subnet_id'] not in listener_subnets:
-                LOG.debug('Found orphaned selfip for %s: deleting %s', host, selfip['id'])
+                LOG.info('Found orphaned selfip for %s: deleting %s', host, selfip['id'])
                 if not dry_run:
                     self.plugin.delete_port(context, selfip['id'])

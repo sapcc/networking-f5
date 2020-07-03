@@ -201,3 +201,32 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         context._plugin.update_port_status(plugin_context,
                                            context.current['id'],
                                            p_constants.PORT_STATUS_ACTIVE)
+
+    def delete_port_postcommit(self, context):
+        # Cleanup selfips if listener deleted
+        if context.current['device_owner'] == constants.DEVICE_OWNER_LISTENER:
+            plugin_context = context._plugin_context
+
+            # Fetch all listeners of this subnet
+            filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER,
+                                        constants.DEVICE_OWNER_LEGACY],
+                       'fixed_ips': {'subnet_id': [context.current['fixed_ips'][0]['subnet_id']]}}
+
+            subnet_listeners = [port['id'] for port in
+                                context._plugin.get_ports(plugin_context, filters, fields=['id', 'name'])
+                                if not (port.get('name', '').startswith('local-') or port['id'] == context.current['id'])]
+
+            if not subnet_listeners:
+                # No listener left, cleanup selfips
+                filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
+                                            constants.DEVICE_OWNER_LEGACY],
+                           'fixed_ips': {'subnet_id': [context.current['fixed_ips'][0]['subnet_id']]}}
+
+                all_selfips = [selfip['id'] for selfip in
+                               context._plugin.get_ports(plugin_context, filters, fields=['id', 'device_owner', 'name'])
+                               if not ((selfip['device_owner'] == constants.DEVICE_OWNER_LEGACY)
+                                       and selfip['name'].startswith('loadbalancer-'))]
+
+                for selfip in all_selfips:
+                    LOG.info('[delete_port_postcommit] Cleanup Self-IP of listener %s: deleting %s', context.current['id'], selfip)
+                    context._plugin.delete_port(plugin_context, selfip)
