@@ -207,10 +207,11 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         if context.current['device_owner'] == constants.DEVICE_OWNER_LISTENER:
             plugin_context = context._plugin_context
 
-            # Fetch all listeners of this subnet
+            # Fetch all listeners of this subnet and device
             filters = {'device_owner': [constants.DEVICE_OWNER_LISTENER,
                                         constants.DEVICE_OWNER_LEGACY],
-                       'fixed_ips': {'subnet_id': [context.current['fixed_ips'][0]['subnet_id']]}}
+                       'fixed_ips': {'subnet_id': [context.current['fixed_ips'][0]['subnet_id']]},
+                       'binding:host_id': [context.host]}
 
             subnet_listeners = [port['id'] for port in
                                 context._plugin.get_ports(plugin_context, filters, fields=['id', 'name'])
@@ -220,7 +221,8 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                 # No listener left, cleanup selfips
                 filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
                                             constants.DEVICE_OWNER_LEGACY],
-                           'fixed_ips': {'subnet_id': [context.current['fixed_ips'][0]['subnet_id']]}}
+                           'fixed_ips': {'subnet_id': [context.current['fixed_ips'][0]['subnet_id']]},
+                           'binding:host_id': [context.host]}
 
                 all_selfips = [selfip['id'] for selfip in
                                context._plugin.get_ports(plugin_context, filters, fields=['id', 'device_owner', 'name'])
