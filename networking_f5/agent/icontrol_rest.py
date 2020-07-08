@@ -146,35 +146,38 @@ class F5iControlRestBackend(F5Backend):
         new_vlans = self._prefix_vlans(vlans)
         v = self.mgmt.tm.net.vlans
         for old_vlan in v.get_collection():
-            # Migration case
-            if old_vlan.name.startswith('net-'):
-                try:
-                    old_vlan.delete()
-                except iControlUnexpectedHTTPError:
+            try:
+                # Migration case
+                if old_vlan.name.startswith('net-'):
+                    try:
+                        old_vlan.delete()
+                    except iControlUnexpectedHTTPError:
+                        pass
+                    continue
+
+                # Not managed by agent
+                if not old_vlan.name.startswith(constants.PREFIX_VLAN):
                     pass
-                continue
 
-            # Not managed by agent
-            if not old_vlan.name.startswith(constants.PREFIX_VLAN):
-                pass
+                # Update
+                elif old_vlan.name in new_vlans:
+                    vlan = new_vlans.pop(old_vlan.name)
+                    if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
+                        old_vlan.tag = vlan['tag']
+                        old_vlan.mtu = vlan['mtu']
+                        old_vlan.hardwareSyncookie = 'enabled'
+                        old_vlan.update()
+                        PROM_INSTANCE.vlan_update.inc()
 
-            # Update
-            elif old_vlan.name in new_vlans:
-                vlan = new_vlans.pop(old_vlan.name)
-                if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
-                    old_vlan.tag = vlan['tag']
-                    old_vlan.mtu = vlan['mtu']
-                    old_vlan.hardwareSyncookie = 'enabled'
-                    old_vlan.update()
-                    PROM_INSTANCE.vlan_update.inc()
-
-            # orphaned
-            else:
-                try:
-                    old_vlan.delete()
-                    PROM_INSTANCE.vlan_delete.inc()
-                except iControlUnexpectedHTTPError:
-                    pass
+                # orphaned
+                else:
+                    try:
+                        old_vlan.delete()
+                        PROM_INSTANCE.vlan_delete.inc()
+                    except iControlUnexpectedHTTPError:
+                        pass
+            except iControlUnexpectedHTTPError as e:
+                LOG.exception(e)
 
         # New ones
         for name, vlan in new_vlans.items():
@@ -211,27 +214,30 @@ class F5iControlRestBackend(F5Backend):
         self.devices = [sip.name[len(constants.PREFIX_SELFIP):] for sip in sips
                         if sip.name.startswith(constants.PREFIX_SELFIP)]
         for old_sip in sips:
-            # Not managed by agent
-            if not old_sip.name.startswith(constants.PREFIX_SELFIP):
-                continue
+            try:
+                # Not managed by agent
+                if not old_sip.name.startswith(constants.PREFIX_SELFIP):
+                    continue
 
-            # Update
-            elif old_sip.name in prefixed_selfips:
-                selfip = prefixed_selfips.pop(old_sip.name)
-                if old_sip.vlan != get_vlan_path(
-                        selfip) or old_sip.address != convert_ip(selfip):
-                    old_sip.vlan = get_vlan_path(selfip)
-                    old_sip.address = convert_ip(selfip)
-                    old_sip.update()
-                    PROM_INSTANCE.selfip_update.inc()
+                # Update
+                elif old_sip.name in prefixed_selfips:
+                    selfip = prefixed_selfips.pop(old_sip.name)
+                    if old_sip.vlan != get_vlan_path(
+                            selfip) or old_sip.address != convert_ip(selfip):
+                        old_sip.vlan = get_vlan_path(selfip)
+                        old_sip.address = convert_ip(selfip)
+                        old_sip.update()
+                        PROM_INSTANCE.selfip_update.inc()
 
-            # orphaned
-            else:
-                try:
-                    old_sip.delete()
-                    PROM_INSTANCE.selfip_delete.inc()
-                except iControlUnexpectedHTTPError:
-                    self.try_delete_object('route', old_sip.name)
+                # orphaned
+                else:
+                    try:
+                        old_sip.delete()
+                        PROM_INSTANCE.selfip_delete.inc()
+                    except iControlUnexpectedHTTPError:
+                        self.try_delete_object('route', old_sip.name)
+            except iControlUnexpectedHTTPError as e:
+                LOG.exception(e)
 
         # New ones
         for name, selfip in prefixed_selfips.items():
@@ -255,27 +261,30 @@ class F5iControlRestBackend(F5Backend):
         prefixed_nets = self._prefix(vlans, constants.PREFIX_NET)
         rds = self.mgmt.tm.net.route_domains
         for rd in rds.get_collection():
-            # Not managed by agent
-            if not rd.name.startswith(constants.PREFIX_NET):
-                pass
-
-            # Update
-            elif rd.name in prefixed_nets:
-                vlan = prefixed_nets.pop(rd.name)
-                vlans = ['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])]
-                if getattr(rd, 'vlans', []) != vlans or rd.id != vlan['tag']:
-                    rd.vlans = vlans
-                    rd.id = vlan['tag']
-                    rd.update()
-                    PROM_INSTANCE.route_domain_update.inc()
-
-            # orphaned
-            else:
-                try:
-                    rd.delete()
-                    PROM_INSTANCE.route_domain_delete.inc()
-                except iControlUnexpectedHTTPError:
+            try:
+                # Not managed by agent
+                if not rd.name.startswith(constants.PREFIX_NET):
                     pass
+
+                # Update
+                elif rd.name in prefixed_nets:
+                    vlan = prefixed_nets.pop(rd.name)
+                    vlans = ['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])]
+                    if getattr(rd, 'vlans', []) != vlans or rd.id != vlan['tag']:
+                        rd.vlans = vlans
+                        rd.id = vlan['tag']
+                        rd.update()
+                        PROM_INSTANCE.route_domain_update.inc()
+
+                # orphaned
+                else:
+                    try:
+                        rd.delete()
+                        PROM_INSTANCE.route_domain_delete.inc()
+                    except iControlUnexpectedHTTPError:
+                        pass
+            except iControlUnexpectedHTTPError as e:
+                LOG.exception(e)
 
         # New ones
         for name, vlan in prefixed_nets.items():
@@ -307,31 +316,34 @@ class F5iControlRestBackend(F5Backend):
 
         routes = self.mgmt.tm.net.routes
         for route in routes.get_collection():
-            # Not managed by agent
-            if not route.name.startswith(constants.PREFIX_SELFIP):
-                pass
-
-            # Update
-            elif route.name in prefixed_selfips:
-                selfip = prefixed_selfips.pop(route.name)
-                gateway = '{}%{}'.format(
-                    selfip['gateway_ip'],
-                    selfip['tag']
-                )
-                network = 'default%{}'.format(selfip['tag'])
-                if route.gw != gateway or route.network != network:
-                    route.gw = gateway
-                    route.network = network
-                    route.update()
-                    PROM_INSTANCE.route_update.inc()
-
-            # orphaned
-            else:
-                try:
-                    route.delete()
-                    PROM_INSTANCE.route_delete.inc()
-                except iControlUnexpectedHTTPError:
+            try:
+                # Not managed by agent
+                if not route.name.startswith(constants.PREFIX_SELFIP):
                     pass
+
+                # Update
+                elif route.name in prefixed_selfips:
+                    selfip = prefixed_selfips.pop(route.name)
+                    gateway = '{}%{}'.format(
+                        selfip['gateway_ip'],
+                        selfip['tag']
+                    )
+                    network = 'default%{}'.format(selfip['tag'])
+                    if route.gw != gateway or route.network != network:
+                        route.gw = gateway
+                        route.network = network
+                        route.update()
+                        PROM_INSTANCE.route_update.inc()
+
+                # orphaned
+                else:
+                    try:
+                        route.delete()
+                        PROM_INSTANCE.route_delete.inc()
+                    except iControlUnexpectedHTTPError:
+                        pass
+            except iControlUnexpectedHTTPError as e:
+                LOG.exception(e)
 
         # New ones
         for name, selfip in prefixed_selfips.items():
