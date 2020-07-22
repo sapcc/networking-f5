@@ -34,7 +34,8 @@ RETRY_INITIAL_DELAY = 1
 RETRY_BACKOFF = 5
 RETRY_MAX = 3
 
-PROM_ACTION = Counter('networking_f5_action', 'Update/Creations/Deletion of l2 entities')
+PROM_ACTION = Counter('networking_f5_action',
+                      'Update/Creations/Deletion of l2 entities', ['type', 'action'])
 REQUEST_TIME_SYNC_ROUTES = Summary(
     'networking_f5_sync_routes_seconds', 'Time spent processing routes')
 REQUEST_TIME_SYNC_VLANS = Summary(
