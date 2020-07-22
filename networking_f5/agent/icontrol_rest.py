@@ -38,18 +38,18 @@ RETRY_MAX = 3
 class PromInstance(object):
     def __init__(self):
         # Prometheus counters
-        self.vlan_update = Counter('vlan_update', 'Updates of vlans')
-        self.vlan_create = Counter('vlan_create', 'Creations of vlans')
-        self.vlan_delete = Counter('vlan_delete', 'Deletions of vlans')
-        self.selfip_update = Counter('selfip_update', 'Updates of selfips')
-        self.selfip_create = Counter('selfip_create', 'Creations of selfips')
-        self.selfip_delete = Counter('selfip_delete', 'Deletions of selfips')
-        self.route_domain_update = Counter('route_domain_update', 'Updates of route_domains')
-        self.route_domain_create = Counter('route_domain_create', 'Creations of route_domains')
-        self.route_domain_delete = Counter('route_domain_delete', 'Deletions of route_domains')
-        self.route_update = Counter('route_update', 'Updates of routes')
-        self.route_create = Counter('route_create', 'Creations of routes')
-        self.route_delete = Counter('route_delete', 'Deletions of routes')
+        self.vlan_update = Counter('networking_f5_vlan_update', 'Updates of vlans')
+        self.vlan_create = Counter('networking_f5_vlan_create', 'Creations of vlans')
+        self.vlan_delete = Counter('networking_f5_vlan_delete', 'Deletions of vlans')
+        self.selfip_update = Counter('networking_f5_selfip_update', 'Updates of selfips')
+        self.selfip_create = Counter('networking_f5_selfip_create', 'Creations of selfips')
+        self.selfip_delete = Counter('networking_f5_selfip_delete', 'Deletions of selfips')
+        self.route_domain_update = Counter('networking_f5_route_domain_update', 'Updates of route_domains')
+        self.route_domain_create = Counter('networking_f5_route_domain_create', 'Creations of route_domains')
+        self.route_domain_delete = Counter('networking_f5_route_domain_delete', 'Deletions of route_domains')
+        self.route_update = Counter('networking_f5_route_update', 'Updates of routes')
+        self.route_create = Counter('networking_f5_route_create', 'Creations of routes')
+        self.route_delete = Counter('networking_f5_route_delete', 'Deletions of routes')
 
 
 PROM_INSTANCE = PromInstance()
@@ -137,7 +137,7 @@ class F5iControlRestBackend(F5Backend):
             pass
 
     REQUEST_TIME_SYNC_VLANS = Summary(
-        'sync_vlan_seconds',
+        'networking_f5_sync_vlan_seconds',
         'Time spent processing vlans')
 
     @REQUEST_TIME_SYNC_VLANS.time()
@@ -186,7 +186,7 @@ class F5iControlRestBackend(F5Backend):
             PROM_INSTANCE.vlan_create.inc()
 
     REQUEST_TIME_SYNC_SELFIPS = Summary(
-        'sync_selfip_seconds',
+        'networking_f5_sync_selfip_seconds',
         'Time spent processing selfips')
 
     @REQUEST_TIME_SYNC_SELFIPS.time()
@@ -253,7 +253,7 @@ class F5iControlRestBackend(F5Backend):
             PROM_INSTANCE.selfip_create.inc()
 
     REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
-        'sync_routedomains_seconds',
+        'networking_f5_sync_routedomains_seconds',
         'Time spent processing routedomains')
 
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
@@ -298,32 +298,31 @@ class F5iControlRestBackend(F5Backend):
                 self.try_delete_object('selfip', name)
 
     REQUEST_TIME_SYNC_ROUTES = Summary(
-        'sync_routes_seconds',
+        'networking_f5_sync_routes_seconds',
         'Time spent processing routes')
 
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
-        prefixed_selfips = self._prefix(
-            selfips, constants.PREFIX_SELFIP)
-
         # We only need one route per network, remove larger gateway IPs
         tmp = defaultdict(list)
-        for val in prefixed_selfips.values():
+        for val in selfips.values():
             tmp[val['network_id']].append(int(netaddr.IPAddress(val['gateway_ip'])))
 
-        prefixed_selfips = dict((key, val) for key, val in prefixed_selfips.items()
-                                if int(netaddr.IPAddress(val['gateway_ip'])) == min(tmp[val['network_id']]))
+        # use network key due to config sync of routes
+        prefixed_networks = dict(('{}{}'.format(constants.PREFIX_NET, val['network_id']), val)
+                                 for val in selfips.values()
+                                 if int(netaddr.IPAddress(val['gateway_ip'])) == min(tmp[val['network_id']]))
 
         routes = self.mgmt.tm.net.routes
         for route in routes.get_collection():
             try:
-                # Not managed by agent
-                if not route.name.startswith(constants.PREFIX_SELFIP):
+                # Not managed by agent, cleanup also selfip-based routes
+                if not (route.name.startswith(constants.PREFIX_SELFIP) or route.name.startswith(constants.PREFIX_NET)):
                     pass
 
                 # Update
-                elif route.name in prefixed_selfips:
-                    selfip = prefixed_selfips.pop(route.name)
+                elif route.name in prefixed_networks:
+                    selfip = prefixed_networks.pop(route.name)
                     gateway = '{}%{}'.format(
                         selfip['gateway_ip'],
                         selfip['tag']
@@ -346,7 +345,7 @@ class F5iControlRestBackend(F5Backend):
                 LOG.exception(e)
 
         # New ones
-        for name, selfip in prefixed_selfips.items():
+        for name, selfip in prefixed_networks.items():
             gateway = '{}%{}'.format(
                 selfip['gateway_ip'],
                 selfip['tag']
@@ -357,7 +356,7 @@ class F5iControlRestBackend(F5Backend):
             PROM_INSTANCE.route_create.inc()
 
     SYNC_ALL_EXCEPTIONS = Counter(
-        'sync_exceptions',
+        'networking_f5_sync_exceptions',
         'Exceptions during sync_all')
 
     @retry(
