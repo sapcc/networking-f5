@@ -34,25 +34,17 @@ RETRY_INITIAL_DELAY = 1
 RETRY_BACKOFF = 5
 RETRY_MAX = 3
 
-
-class PromInstance(object):
-    def __init__(self):
-        # Prometheus counters
-        self.vlan_update = Counter('networking_f5_vlan_update', 'Updates of vlans')
-        self.vlan_create = Counter('networking_f5_vlan_create', 'Creations of vlans')
-        self.vlan_delete = Counter('networking_f5_vlan_delete', 'Deletions of vlans')
-        self.selfip_update = Counter('networking_f5_selfip_update', 'Updates of selfips')
-        self.selfip_create = Counter('networking_f5_selfip_create', 'Creations of selfips')
-        self.selfip_delete = Counter('networking_f5_selfip_delete', 'Deletions of selfips')
-        self.route_domain_update = Counter('networking_f5_route_domain_update', 'Updates of route_domains')
-        self.route_domain_create = Counter('networking_f5_route_domain_create', 'Creations of route_domains')
-        self.route_domain_delete = Counter('networking_f5_route_domain_delete', 'Deletions of route_domains')
-        self.route_update = Counter('networking_f5_route_update', 'Updates of routes')
-        self.route_create = Counter('networking_f5_route_create', 'Creations of routes')
-        self.route_delete = Counter('networking_f5_route_delete', 'Deletions of routes')
-
-
-PROM_INSTANCE = PromInstance()
+PROM_ACTION = Counter('networking_f5_action', 'Update/Creations/Deletion of l2 entities')
+REQUEST_TIME_SYNC_ROUTES = Summary(
+    'networking_f5_sync_routes_seconds', 'Time spent processing routes')
+REQUEST_TIME_SYNC_VLANS = Summary(
+    'networking_f5_sync_vlan_seconds', 'Time spent processing vlans')
+REQUEST_TIME_SYNC_SELFIPS = Summary(
+    'networking_f5_sync_selfip_seconds', 'Time spent processing selfips')
+REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
+    'networking_f5_sync_routedomains_seconds', 'Time spent processing routedomains')
+REQUEST_TIME_SYNC_ALL = Summary(
+    'networking_f5_sync_all', 'Time spent processing sync_all')
 
 
 class F5iControlRestBackend(F5Backend):
@@ -136,10 +128,6 @@ class F5iControlRestBackend(F5Backend):
         except iControlUnexpectedHTTPError:
             pass
 
-    REQUEST_TIME_SYNC_VLANS = Summary(
-        'networking_f5_sync_vlan_seconds',
-        'Time spent processing vlans')
-
     @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
         print(vlans)
@@ -167,13 +155,13 @@ class F5iControlRestBackend(F5Backend):
                         old_vlan.mtu = vlan['mtu']
                         old_vlan.hardwareSyncookie = 'enabled'
                         old_vlan.update()
-                        PROM_INSTANCE.vlan_update.inc()
+                        PROM_ACTION.labels(type='vlan', action='update').inc()
 
                 # orphaned
                 else:
                     try:
                         old_vlan.delete()
-                        PROM_INSTANCE.vlan_delete.inc()
+                        PROM_ACTION.labels(type='vlan', action='delete').inc()
                     except iControlUnexpectedHTTPError:
                         pass
             except iControlUnexpectedHTTPError as e:
@@ -183,11 +171,7 @@ class F5iControlRestBackend(F5Backend):
         for name, vlan in new_vlans.items():
             v.vlan.create(name=name, partition='Common', hardwareSyncookie='enabled',
                           tag=vlan['tag'], mtu=vlan['mtu'])
-            PROM_INSTANCE.vlan_create.inc()
-
-    REQUEST_TIME_SYNC_SELFIPS = Summary(
-        'networking_f5_sync_selfip_seconds',
-        'Time spent processing selfips')
+            PROM_ACTION.labels(type='vlan', action='create').inc()
 
     @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
@@ -227,13 +211,13 @@ class F5iControlRestBackend(F5Backend):
                         old_sip.vlan = get_vlan_path(selfip)
                         old_sip.address = convert_ip(selfip)
                         old_sip.update()
-                        PROM_INSTANCE.selfip_update.inc()
+                        PROM_ACTION.labels(type='selfip', action='update').inc()
 
                 # orphaned
                 else:
                     try:
                         old_sip.delete()
-                        PROM_INSTANCE.selfip_delete.inc()
+                        PROM_ACTION.labels(type='selfip', action='delete').inc()
                     except iControlUnexpectedHTTPError:
                         self.try_delete_object('route', old_sip.name)
             except iControlUnexpectedHTTPError as e:
@@ -250,11 +234,7 @@ class F5iControlRestBackend(F5Backend):
                 vlan='{}{}'.format(constants.PREFIX_VLAN, selfip['tag']),
                 address=convert_ip(selfip),
             )
-            PROM_INSTANCE.selfip_create.inc()
-
-    REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
-        'networking_f5_sync_routedomains_seconds',
-        'Time spent processing routedomains')
+            PROM_ACTION.labels(type='selfip', action='create').inc()
 
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
@@ -274,13 +254,13 @@ class F5iControlRestBackend(F5Backend):
                         rd.vlans = vlans
                         rd.id = vlan['tag']
                         rd.update()
-                        PROM_INSTANCE.route_domain_update.inc()
+                        PROM_ACTION.labels(type='routedomain', action='update').inc()
 
                 # orphaned
                 else:
                     try:
                         rd.delete()
-                        PROM_INSTANCE.route_domain_delete.inc()
+                        PROM_ACTION.labels(type='routedomain', action='delete').inc()
                     except iControlUnexpectedHTTPError:
                         pass
             except iControlUnexpectedHTTPError as e:
@@ -292,14 +272,10 @@ class F5iControlRestBackend(F5Backend):
                 rds.route_domain.create(
                     name=name, partition='Common', id=vlan['tag'],
                     vlans=['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])])
-                PROM_INSTANCE.route_domain_create.inc()
+                PROM_ACTION.labels(type='routedomain', action='create').inc()
             except iControlUnexpectedHTTPError:
                 # Try deleting selfip first and let it resync next time
                 self.try_delete_object('selfip', name)
-
-    REQUEST_TIME_SYNC_ROUTES = Summary(
-        'networking_f5_sync_routes_seconds',
-        'Time spent processing routes')
 
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
@@ -332,13 +308,13 @@ class F5iControlRestBackend(F5Backend):
                         route.gw = gateway
                         route.network = network
                         route.update()
-                        PROM_INSTANCE.route_update.inc()
+                        PROM_ACTION.labels(type='route', action='update').inc()
 
                 # orphaned
                 else:
                     try:
                         route.delete()
-                        PROM_INSTANCE.route_delete.inc()
+                        PROM_ACTION.labels(type='route', action='delete').inc()
                     except iControlUnexpectedHTTPError:
                         pass
             except iControlUnexpectedHTTPError as e:
@@ -353,11 +329,7 @@ class F5iControlRestBackend(F5Backend):
             network = 'default%{}'.format(selfip['tag'])
             routes.route.create(network=network, gw=gateway,
                 name=name, partition='Common')
-            PROM_INSTANCE.route_create.inc()
-
-    SYNC_ALL_EXCEPTIONS = Counter(
-        'networking_f5_sync_exceptions',
-        'Exceptions during sync_all')
+            PROM_ACTION.labels(type='route', action='create').inc()
 
     @retry(
         retry=retry_if_exception_type((Timeout, ConnectionError)),
@@ -365,7 +337,7 @@ class F5iControlRestBackend(F5Backend):
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)
     )
-    @SYNC_ALL_EXCEPTIONS.count_exceptions()
+    @REQUEST_TIME_SYNC_ALL.time()
     def sync_all(self, vlans, selfips):
         try:
             LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
