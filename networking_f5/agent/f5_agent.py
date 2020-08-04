@@ -292,15 +292,21 @@ class F5Manager(amb.CommonAgentManagerBase):
     def get_agent_api(self, **kwargs):
         pass
 
+    def _interface_plugged(self, network_segment, device):
+        return any([host.plug_interface(network_segment, device)
+                    for host in self.devices])
+
     def plug_interface(
             self,
             network_id,
             network_segment,
             device,
             device_owner):
-        LOG.debug("PLUG_INTERFACE: {}".format(device))
-        return any([host.plug_interface(network_segment, device)
-                    for host in self.devices])
+        if not self._interface_plugged(network_segment, device):
+            LOG.debug("PLUG_INTERFACE: {}".format(device))
+            self._full_sync()
+
+        return self._interface_plugged(network_segment, device)
 
     def setup_arp_spoofing_protection(self, device, device_details):
         pass
