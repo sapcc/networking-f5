@@ -120,18 +120,15 @@ class F5iControlRestBackend(F5Backend):
             for val in collection.values()
         }
 
-    def try_delete_object(self, o_type, name):
-        try:
-
-            o = getattr(self.mgmt.tm.net, o_type + 's')
-            o = getattr(o, o_type).load(name=name)
-            o.delete()
-        except iControlUnexpectedHTTPError:
-            pass
+    def delete_object(self, o_type, name):
+        o_type = o_type.replace('routedomain', 'route_domain')
+        o = getattr(self.mgmt.tm.net, o_type + 's')
+        o = getattr(o, o_type).load(name=name)
+        o.delete()
 
     @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
-        print(vlans)
+        orphaned = []
         new_vlans = self._prefix_vlans(vlans)
         v = self.mgmt.tm.net.vlans
         for old_vlan in v.get_collection():
@@ -155,27 +152,26 @@ class F5iControlRestBackend(F5Backend):
                         old_vlan.tag = vlan['tag']
                         old_vlan.mtu = vlan['mtu']
                         old_vlan.hardwareSyncookie = 'enabled'
-                        old_vlan.update()
                         PROM_ACTION.labels(type='vlan', action='update').inc()
+                        old_vlan.update()
 
                 # orphaned
                 else:
-                    try:
-                        old_vlan.delete()
-                        PROM_ACTION.labels(type='vlan', action='delete').inc()
-                    except iControlUnexpectedHTTPError:
-                        pass
+                    orphaned.append(old_vlan.name)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
         # New ones
         for name, vlan in new_vlans.items():
+            PROM_ACTION.labels(type='vlan', action='create').inc()
             v.vlan.create(name=name, partition='Common', hardwareSyncookie='enabled',
                           tag=vlan['tag'], mtu=vlan['mtu'])
-            PROM_ACTION.labels(type='vlan', action='create').inc()
+
+        return orphaned
 
     @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
+        orphaned = []
         def convert_ip(selfip):
             if selfip['ip_address'].find('/') >= 0:
                 selfip['prefixlen'] = netaddr.IPNetwork(selfip['ip_address']).prefixlen
@@ -216,11 +212,7 @@ class F5iControlRestBackend(F5Backend):
 
                 # orphaned
                 else:
-                    try:
-                        old_sip.delete()
-                        PROM_ACTION.labels(type='selfip', action='delete').inc()
-                    except iControlUnexpectedHTTPError:
-                        self.try_delete_object('route', old_sip.name)
+                    orphaned.append(old_sip.name)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
@@ -236,9 +228,11 @@ class F5iControlRestBackend(F5Backend):
                 address=convert_ip(selfip),
             )
             PROM_ACTION.labels(type='selfip', action='create').inc()
+        return orphaned
 
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
+        orphaned = []
         prefixed_nets = self._prefix(vlans, constants.PREFIX_NET)
         rds = self.mgmt.tm.net.route_domains
         for rd in rds.get_collection():
@@ -254,32 +248,33 @@ class F5iControlRestBackend(F5Backend):
                     if getattr(rd, 'vlans', []) != vlans or rd.id != vlan['tag']:
                         rd.vlans = vlans
                         rd.id = vlan['tag']
-                        rd.update()
                         PROM_ACTION.labels(type='routedomain', action='update').inc()
+                        rd.update()
 
                 # orphaned
                 else:
-                    try:
-                        rd.delete()
-                        PROM_ACTION.labels(type='routedomain', action='delete').inc()
-                    except iControlUnexpectedHTTPError:
-                        pass
+                    orphaned.append(rd.name)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
         # New ones
         for name, vlan in prefixed_nets.items():
             try:
+                PROM_ACTION.labels(type='routedomain', action='create').inc()
                 rds.route_domain.create(
                     name=name, partition='Common', id=vlan['tag'],
                     vlans=['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])])
-                PROM_ACTION.labels(type='routedomain', action='create').inc()
             except iControlUnexpectedHTTPError:
                 # Try deleting selfip first and let it resync next time
-                self.try_delete_object('selfip', name)
+                try:
+                    self.delete_object('selfip', name)
+                except iControlUnexpectedHTTPError:
+                    pass
+        return orphaned
 
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
+        orphaned = []
         # We only need one route per network, remove larger gateway IPs
         tmp = defaultdict(list)
         for val in selfips.values():
@@ -308,16 +303,12 @@ class F5iControlRestBackend(F5Backend):
                     if route.gw != gateway or route.network != network:
                         route.gw = gateway
                         route.network = network
-                        route.update()
                         PROM_ACTION.labels(type='route', action='update').inc()
+                        route.update()
 
                 # orphaned
                 else:
-                    try:
-                        route.delete()
-                        PROM_ACTION.labels(type='route', action='delete').inc()
-                    except iControlUnexpectedHTTPError:
-                        pass
+                    orphaned.append(route.name)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
@@ -328,9 +319,11 @@ class F5iControlRestBackend(F5Backend):
                 selfip['tag']
             )
             network = 'default%{}'.format(selfip['tag'])
+            PROM_ACTION.labels(type='route', action='create').inc()
             routes.route.create(network=network, gw=gateway,
                 name=name, partition='Common')
-            PROM_ACTION.labels(type='route', action='create').inc()
+
+        return orphaned
 
     @retry(
         retry=retry_if_exception_type((Timeout, ConnectionError)),
@@ -340,30 +333,42 @@ class F5iControlRestBackend(F5Backend):
     )
     @REQUEST_TIME_SYNC_ALL.time()
     def sync_all(self, vlans, selfips):
+        orphaned = {}
         try:
             LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
-            self._sync_vlans(vlans)
+            orphaned['vlan'] = self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
-            self._sync_routedomains(vlans)
+            orphaned['routedomain'] = self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in selfips.values()])
-            self._sync_selfips(selfips)
+            orphaned['selfip'] = self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()])
-            self._sync_routes(selfips)
+            orphaned['route'] = self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
+        # Cleanup should happen in reverse order
+        LOG.info("Cleaning up orphaned objectss: %s", orphaned)
+        for object_type in ['route', 'selfip', 'routedomain', 'vlan']:
+            for name in orphaned[object_type]:
+                try:
+                    PROM_ACTION.labels(type=object_type, action='delete').inc()
+                    self.delete_object(object_type, name)
+                except iControlUnexpectedHTTPError as e:
+                    LOG.exception(e)
+
+    ####
     def plug_interface(self, network_segment, device):
         name = constants.PREFIX_SELFIP + device
         if self.mgmt.tm.net.selfips.selfip.exists(name=name):
