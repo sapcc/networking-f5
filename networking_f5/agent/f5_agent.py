@@ -302,8 +302,8 @@ class F5Manager(amb.CommonAgentManagerBase):
             network_segment,
             device,
             device_owner):
+        LOG.debug("PLUG_INTERFACE: {}".format(device))
         if not self._interface_plugged(network_segment, device):
-            LOG.debug("PLUG_INTERFACE: {}".format(device))
             self._full_sync()
 
         return self._interface_plugged(network_segment, device)

@@ -368,8 +368,8 @@ class F5iControlRestBackend(F5Backend):
                 except iControlUnexpectedHTTPError as e:
                     LOG.exception(e)
 
-    ####
     def plug_interface(self, network_segment, device):
+
         name = constants.PREFIX_SELFIP + device
         if self.mgmt.tm.net.selfips.selfip.exists(name=name):
             return True
