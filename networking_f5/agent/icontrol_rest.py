@@ -157,7 +157,7 @@ class F5iControlRestBackend(F5Backend):
 
                 # orphaned
                 else:
-                    orphaned.append(old_vlan.name)
+                    orphaned.append(old_vlan)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
@@ -212,7 +212,7 @@ class F5iControlRestBackend(F5Backend):
 
                 # orphaned
                 else:
-                    orphaned.append(old_sip.name)
+                    orphaned.append(old_sip)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
@@ -253,7 +253,7 @@ class F5iControlRestBackend(F5Backend):
 
                 # orphaned
                 else:
-                    orphaned.append(rd.name)
+                    orphaned.append(rd)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
@@ -308,7 +308,7 @@ class F5iControlRestBackend(F5Backend):
 
                 # orphaned
                 else:
-                    orphaned.append(route.name)
+                    orphaned.append(route)
             except iControlUnexpectedHTTPError as e:
                 LOG.exception(e)
 
@@ -359,14 +359,15 @@ class F5iControlRestBackend(F5Backend):
             LOG.exception(e)
 
         # Cleanup should happen in reverse order
-        LOG.info("Cleaning up orphaned objectss: %s", orphaned)
         for object_type in ['route', 'selfip', 'routedomain', 'vlan']:
-            for name in orphaned[object_type]:
-                try:
-                    PROM_ACTION.labels(type=object_type, action='delete').inc()
-                    self.delete_object(object_type, name)
-                except iControlUnexpectedHTTPError as e:
-                    LOG.exception(e)
+            if len(orphaned[object_type]) > 0:
+                LOG.info("Cleaning up orphaned %s: %s", object_type, [o.name for o in orphaned[object_type]])
+                for o in orphaned[object_type]:
+                    try:
+                        PROM_ACTION.labels(type=object_type, action='delete').inc()
+                        o.delete()
+                    except iControlUnexpectedHTTPError as e:
+                        LOG.exception(e)
 
     def plug_interface(self, network_segment, device):
 
