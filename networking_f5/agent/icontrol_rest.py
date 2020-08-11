@@ -126,6 +126,12 @@ class F5iControlRestBackend(F5Backend):
         o = getattr(o, o_type).load(name=name)
         o.delete()
 
+    @retry(
+        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
+        wait=wait_incrementing(
+            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
+        stop=stop_after_attempt(RETRY_ATTEMPTS)
+    )
     @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
         orphaned = []
@@ -169,6 +175,12 @@ class F5iControlRestBackend(F5Backend):
 
         return orphaned
 
+    @retry(
+        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
+        wait=wait_incrementing(
+            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
+        stop=stop_after_attempt(RETRY_ATTEMPTS)
+    )
     @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
         orphaned = []
@@ -230,6 +242,12 @@ class F5iControlRestBackend(F5Backend):
             PROM_ACTION.labels(type='selfip', action='create').inc()
         return orphaned
 
+    @retry(
+        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
+        wait=wait_incrementing(
+            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
+        stop=stop_after_attempt(RETRY_ATTEMPTS)
+    )
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
         orphaned = []
@@ -272,6 +290,12 @@ class F5iControlRestBackend(F5Backend):
                     pass
         return orphaned
 
+    @retry(
+        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
+        wait=wait_incrementing(
+            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
+        stop=stop_after_attempt(RETRY_ATTEMPTS)
+    )
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
         orphaned = []
@@ -360,7 +384,7 @@ class F5iControlRestBackend(F5Backend):
 
         # Cleanup should happen in reverse order
         for object_type in ['route', 'selfip', 'routedomain', 'vlan']:
-            if len(orphaned[object_type]) > 0:
+            if object_type in orphaned and len(orphaned[object_type]) > 0:
                 LOG.info("Cleaning up orphaned %s: %s", object_type, [o.name for o in orphaned[object_type]])
                 for o in orphaned[object_type]:
                     try:
