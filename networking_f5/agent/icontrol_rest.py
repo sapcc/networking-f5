@@ -154,12 +154,17 @@ class F5iControlRestBackend(F5Backend):
                 # Update
                 elif old_vlan.name in new_vlans:
                     vlan = new_vlans.pop(old_vlan.name)
-                    if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
+                    if (old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu'] or
+                            old_vlan.synFloodRateLimit != self.conf.F5.syn_flood_rate_limit or
+                            old_vlan.syncacheThreshold != self.conf.F5.syncache_threshold):
                         old_vlan.tag = vlan['tag']
                         old_vlan.mtu = vlan['mtu']
-                        old_vlan.hardwareSyncookie = 'enabled'
+                        old_vlan.hardwareSyncookie = 'enabled' if self.conf.F5.hardware_syncookie else 'disabled'
+                        old_vlan.synFloodRateLimit = self.conf.F5.syn_flood_rate_limit
+                        old_vlan.syncacheThreshold = self.conf.F5.syncache_threshold
                         PROM_ACTION.labels(type='vlan', action='update').inc()
                         old_vlan.update()
+
 
                 # orphaned
                 else:
@@ -170,8 +175,12 @@ class F5iControlRestBackend(F5Backend):
         # New ones
         for name, vlan in new_vlans.items():
             PROM_ACTION.labels(type='vlan', action='create').inc()
-            v.vlan.create(name=name, partition='Common', hardwareSyncookie='enabled',
-                          tag=vlan['tag'], mtu=vlan['mtu'])
+            v.vlan.create(name=name, partition='Common',
+                          tag=vlan['tag'], mtu=vlan['mtu'],
+                          hardwareSyncookie='enabled' if self.conf.F5.hardware_syncookie else 'disabled',
+                          synFloodRateLimit=self.conf.F5.syn_flood_rate_limit,
+                          syncacheThreshold=self.conf.F5.syncache_threshold
+            )
 
         return orphaned
 

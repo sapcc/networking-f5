@@ -66,6 +66,19 @@ F5_OPTS = [
     cfg.BoolOpt('cleanup',
                 default=False,
                 help=_("Enable automatic cleanup of selfips (else dry-run)")),
+    cfg.BoolOpt('hardware_syncookie',
+                default=True,
+                help=_("Enables hardware syncookie mode on a VLAN. When enabled, "
+                       "the hardware per-VLAN SYN cookie protection will be triggered "
+                       "when the certain traffic threshold is reached on supported platforms.")),
+    cfg.IntOpt('syn_flood_rate_limit',
+                default=2000,
+                help=_("Specifies the max number of SYN flood packets per second received on the "
+                       "VLAN before the hardware per-VLAN SYN cookie protection is triggered.")),
+    cfg.IntOpt('syncache_threshold',
+                default=32000,
+                help=_("Specifies the number of outstanding SYN packets on the VLAN that will "
+                       "trigger the hardware per-VLAN SYN cookie protection.")),
     cfg.StrOpt('override_hostname',
                default=None,
                help=_('Override hostname')),

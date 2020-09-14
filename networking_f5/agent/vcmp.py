@@ -18,6 +18,7 @@ import sys
 import six
 from f5.bigip import ManagementRoot
 from icontrol.exceptions import iControlUnexpectedHTTPError
+from oslo_config import cfg
 from oslo_log import log as logging
 from prometheus_client import Summary
 from requests import Timeout, ConnectionError
@@ -27,6 +28,7 @@ from tenacity import retry_if_exception_type, \
 from networking_f5 import constants
 
 LOG = logging.getLogger(__name__)
+CONF = cfg.CONF
 
 RETRY_ATTEMPTS = 3
 RETRY_INITIAL_DELAY = 1
@@ -98,10 +100,14 @@ class F5vCMPBackend(object):
             # Update
             if old_vlan.name in orig_vlans:
                 vlan = orig_vlans.pop(old_vlan.name)
-                if old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu']:
+                if (old_vlan.tag != vlan['tag'] or old_vlan.mtu != vlan['mtu'] or
+                        old_vlan.synFloodRateLimit != CONF.F5.syn_flood_rate_limit or
+                        old_vlan.syncacheThreshold != CONF.F5.syncache_threshold):
                     old_vlan.tag = vlan['tag']
                     old_vlan.mtu = vlan['mtu']
-                    old_vlan.hardwareSyncookie = 'enabled'
+                    old_vlan.hardwareSyncookie = 'enabled' if CONF.F5.hardware_syncookie else 'disabled'
+                    old_vlan.synFloodRateLimit = CONF.F5.syn_flood_rate_limit
+                    old_vlan.syncacheThreshold = CONF.F5.syncache_threshold
                     old_vlan.update()
 
                 if not old_vlan.interfaces_s.interfaces.exists(
@@ -128,7 +134,9 @@ class F5vCMPBackend(object):
             new_vlan = v.vlan.create(name=name,
                                      partition='Common',
                                      tag=vlan['tag'], mtu=vlan['mtu'],
-                                     hardwareSyncookie='enabled')
+                                     hardwareSyncookie='enabled' if CONF.F5.hardware_syncookie else 'disabled',
+                                     synFloodRateLimit=CONF.F5.syn_flood_rate_limit,
+                                     syncacheThreshold=CONF.F5.syncache_threshold)
             new_vlan.interfaces_s.interfaces.create(
                 tagged=True,
                 name=self.mappings[vlan['physical_network']],
