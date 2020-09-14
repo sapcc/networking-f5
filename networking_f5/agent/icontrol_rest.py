@@ -67,7 +67,7 @@ class F5iControlRestBackend(F5Backend):
         self.mgmt = ManagementRoot(
             self.device.hostname,
             self.device.username,
-            self.device.password,
+            parse.unquote(self.device.password),
             token=True,
             verify=self.conf.F5.https_verify
         )

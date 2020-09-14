@@ -12,28 +12,29 @@
 # License for the specific language governing permissions and limitations
 # under the License.
 
-from neutron_lib.utils import helpers
-from neutron_lib import context
-from neutron.plugins.ml2.drivers.agent import _common_agent as ca
-from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
-from neutron.conf.agent import common as agent_config
-from neutron.common import topics
-from neutron.common import rpc as n_rpc
-from neutron.common import config as common_config
-from networking_f5.agent.vcmp import F5vCMPBackend
-from networking_f5._i18n import _
-from networking_f5 import constants
-from stevedore import driver
-from prometheus_client import start_http_server
-from oslo_service import service, loopingcall
-from oslo_log import log as logging
-from oslo_config import cfg
-import six
-import oslo_messaging
 import abc
 import sys
 
 import eventlet
+import oslo_messaging
+import six
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_service import service, loopingcall
+from prometheus_client import start_http_server
+from stevedore import driver
+
+from networking_f5 import constants
+from networking_f5._i18n import _
+from networking_f5.agent.vcmp import F5vCMPBackend
+from neutron.common import config as common_config
+from neutron.common import rpc as n_rpc
+from neutron.common import topics
+from neutron.conf.agent import common as agent_config
+from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
+from neutron.plugins.ml2.drivers.agent import _common_agent as ca
+from neutron_lib import context
+from neutron_lib.utils import helpers
 
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
 eventlet.monkey_patch()
@@ -86,10 +87,16 @@ F5_OPTS = [
 
 F5_VMCP_OPTS = [
     cfg.StrOpt('username',
+               deprecated_for_removal=True,
                help=_('Username for vCMP Host.')),
     cfg.StrOpt('password',
                secret=True,
+               deprecated_for_removal=True,
                help=_('Password for vCMP Host')),
+    cfg.ListOpt('devices',
+                item_type=cfg.types.URI(schemes=['http', 'https']),
+                default=[],
+                help=_("List of device urls to be synced by the agent")),
     cfg.DictOpt('hosts_guest_mappings',
                 default={},
                 help=_("VCMP host and respective guest name mapping for "
@@ -229,15 +236,9 @@ class F5Manager(amb.CommonAgentManagerBase):
             invoke_on_load=True,
             invoke_args=(self.conf, uri, self.device_mappings)
         ).driver for uri in sorted(self.conf.F5.devices)]
-        if self.conf.F5_VCMP.hosts_guest_mappings:
-            self.vcmps = [F5vCMPBackend(
-                self.device_mappings,
-                self.conf.F5_VCMP.username,
-                self.conf.F5_VCMP.password,
-                host,
-                guest
-            ) for host, guest in
-                self.conf.F5_VCMP.hosts_guest_mappings.items()]
+        self.vcmps = [F5vCMPBackend(uri, self.device_mappings)
+                      for uri in sorted(self.conf.F5_VCMP.devices or
+                                        self.conf.F5_VCMP.hosts_guest_mappings.keys())]
 
     def get_all_devices(self):
         all_devices = set()

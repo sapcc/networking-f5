@@ -22,6 +22,7 @@ from oslo_config import cfg
 from oslo_log import log as logging
 from prometheus_client import Summary
 from requests import Timeout, ConnectionError
+from six.moves.urllib import parse
 from tenacity import retry_if_exception_type, \
     wait_incrementing, stop_after_attempt, retry
 
@@ -37,14 +38,14 @@ RETRY_MAX = 3
 
 
 class F5vCMPBackend(object):
-    def __init__(self, physical_device_mappings,
-                 username, password, host, guest):
+    def __init__(self, uri, physical_device_mappings):
         self.mgmt = None
         self.mappings = physical_device_mappings
-        self.vcmp_username = username
-        self.vcmp_password = password
-        self.vcmp_host = host
-        self.vcmp_guest = guest
+        self.device = parse.urlparse(uri)
+        self.vcmp_username = self.device.username or CONF.F5_VCMP.username
+        self.vcmp_password = parse.unquote(self.device.password) or CONF.F5_VCMP.password
+        self.vcmp_host = self.device.hostname or self.device.path
+        self.vcmp_guest = CONF.F5_VCMP.hosts_guest_mappings[self.vcmp_host]
         self._login()
 
     def _login(self):
