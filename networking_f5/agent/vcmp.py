@@ -43,7 +43,7 @@ class F5vCMPBackend(object):
         self.mappings = physical_device_mappings
         self.device = parse.urlparse(uri)
         self.vcmp_username = self.device.username or CONF.F5_VCMP.username
-        self.vcmp_password = parse.unquote(self.device.password) or CONF.F5_VCMP.password
+        self.vcmp_password = parse.unquote(self.device.password or "") or CONF.F5_VCMP.password
         self.vcmp_host = self.device.hostname or self.device.path
         self.vcmp_guest = CONF.F5_VCMP.hosts_guest_mappings[self.vcmp_host]
         self._login()
