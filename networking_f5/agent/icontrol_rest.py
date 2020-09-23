@@ -126,12 +126,6 @@ class F5iControlRestBackend(F5Backend):
         o = getattr(o, o_type).load(name=name)
         o.delete()
 
-    @retry(
-        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
-        wait=wait_incrementing(
-            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
-        stop=stop_after_attempt(RETRY_ATTEMPTS)
-    )
     @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
         orphaned = []
@@ -184,12 +178,6 @@ class F5iControlRestBackend(F5Backend):
 
         return orphaned
 
-    @retry(
-        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
-        wait=wait_incrementing(
-            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
-        stop=stop_after_attempt(RETRY_ATTEMPTS)
-    )
     @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
         orphaned = []
@@ -242,21 +230,24 @@ class F5iControlRestBackend(F5Backend):
             if self.get_host() != selfip['host']:
                 continue
 
-            self.mgmt.tm.net.selfips.selfip.create(
-                name=name,
-                partition='Common',
-                vlan='{}{}'.format(constants.PREFIX_VLAN, selfip['tag']),
-                address=convert_ip(selfip),
-            )
+            # If there is a (race-condition induced) conflict, ignore cleanup/new
+            if convert_ip(selfip) in [orphan.address for orphan in orphaned]:
+                orphaned = [orphan for orphan in orphaned
+                            if orphan.address != convert_ip(selfip)]
+                continue
+
+            try:
+                self.mgmt.tm.net.selfips.selfip.create(
+                    name=name,
+                    partition='Common',
+                    vlan='{}{}'.format(constants.PREFIX_VLAN, selfip['tag']),
+                    address=convert_ip(selfip),
+                )
+            except iControlUnexpectedHTTPError as e:
+                LOG.exception(e)
             PROM_ACTION.labels(type='selfip', action='create').inc()
         return orphaned
 
-    @retry(
-        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
-        wait=wait_incrementing(
-            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
-        stop=stop_after_attempt(RETRY_ATTEMPTS)
-    )
     @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
         orphaned = []
@@ -299,12 +290,6 @@ class F5iControlRestBackend(F5Backend):
                     pass
         return orphaned
 
-    @retry(
-        retry=retry_if_exception_type(iControlUnexpectedHTTPError),
-        wait=wait_incrementing(
-            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
-        stop=stop_after_attempt(RETRY_ATTEMPTS)
-    )
     @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
         orphaned = []
