@@ -36,6 +36,7 @@ RETRY_MAX = 3
 
 PROM_ACTION = Counter('networking_f5_action',
                       'Update/Creations/Deletion of l2 entities', ['type', 'action'])
+REQUEST_SYNC_EXCEPTIONS = Counter('networking_f5_sync_exceptions', 'Sync exception count', ['type'])
 REQUEST_TIME_SYNC_ROUTES = Summary(
     'networking_f5_sync_routes_seconds', 'Time spent processing routes')
 REQUEST_TIME_SYNC_VLANS = Summary(
@@ -356,26 +357,30 @@ class F5iControlRestBackend(F5Backend):
         orphaned = {}
         try:
             LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
-            orphaned['vlan'] = self._sync_vlans(vlans)
+            with REQUEST_SYNC_EXCEPTIONS.labels(type='vlan').count_exceptions():
+                orphaned['vlan'] = self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
-            orphaned['routedomain'] = self._sync_routedomains(vlans)
+            with REQUEST_SYNC_EXCEPTIONS.labels(type='routedomain').count_exceptions():
+                orphaned['routedomain'] = self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in selfips.values()])
-            orphaned['selfip'] = self._sync_selfips(selfips)
+            with REQUEST_SYNC_EXCEPTIONS.labels(type='selfip').count_exceptions():
+                orphaned['selfip'] = self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()
                                             if selfip['gateway_ip']])
-            orphaned['route'] = self._sync_routes(selfips)
+            with REQUEST_SYNC_EXCEPTIONS.labels(type='route').count_exceptions():
+                orphaned['route'] = self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
