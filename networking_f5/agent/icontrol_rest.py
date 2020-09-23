@@ -311,12 +311,14 @@ class F5iControlRestBackend(F5Backend):
         # We only need one route per network, remove larger gateway IPs
         tmp = defaultdict(list)
         for val in selfips.values():
-            tmp[val['network_id']].append(int(netaddr.IPAddress(val['gateway_ip'])))
+            if val['gateway_ip']:
+                tmp[val['network_id']].append(int(netaddr.IPAddress(val['gateway_ip'])))
 
         # use network key due to config sync of routes
         prefixed_networks = dict(('{}{}'.format(constants.PREFIX_NET, val['network_id']), val)
                                  for val in selfips.values()
-                                 if int(netaddr.IPAddress(val['gateway_ip'])) == min(tmp[val['network_id']]))
+                                 if val['gateway_ip']
+                                 and int(netaddr.IPAddress(val['gateway_ip'])) == min(tmp[val['network_id']]))
 
         routes = self.mgmt.tm.net.routes
         for route in routes.get_collection():
@@ -386,7 +388,8 @@ class F5iControlRestBackend(F5Backend):
             LOG.exception(e)
 
         try:
-            LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()])
+            LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()
+                                            if selfip['gateway_ip']])
             orphaned['route'] = self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
