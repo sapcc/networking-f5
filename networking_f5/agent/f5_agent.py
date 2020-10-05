@@ -18,6 +18,8 @@ import sys
 import eventlet
 import oslo_messaging
 import six
+from oslo_concurrency import lockutils
+from oslo_concurrency import watchdog
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_service import service, loopingcall
@@ -195,7 +197,9 @@ class F5DOAgentManagerRpcCallBackBase(amb.CommonAgentManagerRpcCallBackBase):
 
     def port_update(self, context, **kwargs):
         port = kwargs['port']
-        self.updated_devices.add(port['mac_address'])
+        if port['binding:vif_type'] == 'f5' and port['binding:host_id'] == self.agent.mgr.conf.host:
+            LOG.debug("Got Port update for port %s", kwargs['port'])
+            self.agent.mgr._full_sync()
 
 
 class F5Manager(amb.CommonAgentManagerBase):
@@ -210,9 +214,10 @@ class F5Manager(amb.CommonAgentManagerBase):
         self.devices = []
         self.vcmps = []
         self._connect()
+        sys.setrecursionlimit(15000)
 
         LOG.debug("Ensuring all selfips bound for this agent")
-        self.plugin_rpc.ensure_selfips_for_agent(self.ctx)
+        #self.plugin_rpc.ensure_selfips_for_agent(self.ctx)
 
         sync_interval = self.conf.F5.sync_interval
         if sync_interval:
@@ -267,35 +272,38 @@ class F5Manager(amb.CommonAgentManagerBase):
 
     def get_rpc_consumers(self):
         return [[topics.PORT, topics.UPDATE],
+                [topics.PORT, topics.CREATE],
                 [topics.NETWORK, topics.UPDATE]]
 
+    @lockutils.synchronized('_f5_full_sync')
     def _full_sync(self):
         res = self.plugin_rpc.get_selfips_and_vlans(self.ctx)
 
-        for device in self.devices:
-            if cfg.CONF.F5.migration and device.is_active():
-                LOG.warning("Migration: Skipping active F5 device %s", device.get_host())
-                continue
-
-            LOG.debug("Syncing F5 device %s", device.get_host())
-            device.sync_all(
-                vlans=res.get('vlans', {}).copy(),
-                selfips={
-                    key: val for key, val in res.get(
-                        'selfips',
-                        {}).items() if
-                    device.get_host() == val.get('host', None)
-                })
-
-        for vcmp in self.vcmps:
-            if cfg.CONF.F5.migration:
-                active_devices = [device.device.hostname for device in self.devices
-                                  if device.is_active()]
-                if vcmp.vcmp_guest in active_devices:
-                    LOG.warning("Migration: Skipping active F5 device %s", vcmp.vcmp_host)
+        with watchdog.watch(LOG, "networking-f5 sync loop", logging.ERROR, 60):
+            for device in self.devices:
+                if cfg.CONF.F5.migration and device.is_active():
+                    LOG.warning("Migration: Skipping active F5 device %s", device.get_host())
                     continue
-            LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
-            vcmp.sync_vlan(res['vlans'].copy())
+
+                LOG.debug("Syncing F5 device %s", device.get_host())
+                device.sync_all(
+                    vlans=res.get('vlans', {}).copy(),
+                    selfips={
+                        key: val for key, val in res.get(
+                            'selfips',
+                            {}).items() if
+                        device.get_host() == val.get('host', None)
+                    })
+
+            for vcmp in self.vcmps:
+                if cfg.CONF.F5.migration:
+                    active_devices = [device.device.hostname for device in self.devices
+                                      if device.is_active()]
+                    if vcmp.vcmp_guest in active_devices:
+                        LOG.warning("Migration: Skipping active F5 device %s", vcmp.vcmp_host)
+                        continue
+                LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
+                vcmp.sync_vlan(res['vlans'].copy())
 
     def ensure_port_admin_state(self, device, admin_state_up):
         pass

@@ -66,8 +66,9 @@ class F5DORpcCallback(object):
                             port.network_id, port.id)
                 continue
 
+            # Use vlan segments associated with exactly this port
             segment = [binding_level.segment for binding_level in port.binding_levels
-                       if binding_level.segment.network_type == 'vlan']
+                       if binding_level.segment.network_type == 'vlan' and binding_level.port_id == port.id]
             if not segment:
                 LOG.error("No valid binding level found for port %s", port.id)
                 continue

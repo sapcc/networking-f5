@@ -14,6 +14,7 @@
 import re
 
 from netaddr import IPNetwork
+from oslo_config import cfg
 from oslo_log import log
 
 from networking_f5 import constants
@@ -22,11 +23,13 @@ from neutron import service
 from neutron.common import rpc
 from neutron.db import db_base_plugin_v2
 from neutron.db import provisioning_blocks
+from neutron.plugins.ml2 import rpc as ml2_rpc
 from neutron.plugins.ml2.drivers import mech_agent
 from neutron_lib import constants as p_constants
+from neutron_lib.agent import topics
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.callbacks import resources
-from oslo_config import cfg
+from neutron_lib.plugins.ml2 import api
 
 LOG = log.getLogger(__name__)
 
@@ -48,6 +51,7 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
             constants.AGENT_TYPE_F5,
             constants.VIF_TYPE_F5,
             {portbindings.CAP_PORT_FILTER: False})
+        self.notifier = ml2_rpc.AgentNotifierApi(topics.AGENT)
         LOG.info("F5 ML2 mechanism driver initialized...")
 
     def start_rpc_state_reports_listener(self):
@@ -195,12 +199,28 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                   [selfip['id'] for selfip in selfips],
                   context.current['id'])
 
+        self._notify_port_updated(context)
         provisioning_blocks.provisioning_complete(
             plugin_context, context.current['id'], resources.PORT,
             provisioning_blocks.L2_AGENT_ENTITY)
         context._plugin.update_port_status(plugin_context,
                                            context.current['id'],
                                            p_constants.PORT_STATUS_ACTIVE)
+
+    def _notify_port_updated(self, mech_context):
+        port = mech_context.current
+        segment = mech_context.bottom_bound_segment
+        if not segment:
+            # REVISIT(rkukura): This should notify agent to unplug port
+            network = mech_context.network.current
+            LOG.debug("In _notify_port_updated(), no bound segment for "
+                      "port %(port_id)s on network %(network_id)s",
+                      {'port_id': port['id'], 'network_id': network['id']})
+            return
+        self.notifier.port_update(mech_context._plugin_context, port,
+                                  segment[api.NETWORK_TYPE],
+                                  segment[api.SEGMENTATION_ID],
+                                  segment[api.PHYSICAL_NETWORK])
 
     def delete_port_postcommit(self, context):
         # Cleanup selfips if listener deleted
