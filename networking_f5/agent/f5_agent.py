@@ -14,6 +14,7 @@
 
 import abc
 import sys
+import time
 
 import eventlet
 import oslo_messaging
@@ -22,19 +23,19 @@ from oslo_concurrency import lockutils
 from oslo_concurrency import watchdog
 from oslo_config import cfg
 from oslo_log import log as logging
-from oslo_service import service, loopingcall
+from oslo_service import loopingcall
 from prometheus_client import start_http_server
 from stevedore import driver
 
 from networking_f5 import constants
 from networking_f5._i18n import _
 from networking_f5.agent.vcmp import F5vCMPBackend
+from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
 from neutron.common import rpc as n_rpc
 from neutron.common import topics
 from neutron.conf.agent import common as agent_config
-from neutron.plugins.ml2.drivers.agent import _agent_manager_base as amb
-from neutron.plugins.ml2.drivers.agent import _common_agent as ca
+from neutron_lib import constants as n_const
 from neutron_lib import context
 from neutron_lib.utils import helpers
 
@@ -50,6 +51,11 @@ F5_OPTS = [
                help=_('Backend driver for BigIP F5 communication')),
     cfg.FloatOpt('sync_interval', default=90,
                  help=_('Seconds between full sync.')),
+    cfg.FloatOpt('cleanup_interval', default=600,
+                 help=_('Seconds between selfip cleanups.')),
+    cfg.IntOpt('polling_interval', default=5,
+               help=_("The number of seconds the agent will wait between "
+                      "polling for local device changes.")),
     cfg.ListOpt('physical_device_mappings',
                 default=[],
                 help=_("List of <physical_network>:<device_interface>.")),
@@ -150,7 +156,7 @@ class F5Backend(object):
         """plug interface"""
 
 
-class F5DOPluginAPI(object):
+class F5PluginAPI(object):
     """F5 declarative onboarding agent RPC callback
        in plugin implementations.
     """
@@ -178,8 +184,11 @@ class F5DOPluginAPI(object):
                           host=self.host, **kwargs)
 
 
-class F5DOAgentManagerRpcCallBackBase(amb.CommonAgentManagerRpcCallBackBase):
+class F5AgentRpcCallBack(object):
     target = oslo_messaging.Target(version='1.4')
+
+    def __init__(self, agent):
+        self.agent = agent
 
     def security_groups_rule_updated(self, context, **kwargs):
         pass
@@ -188,51 +197,88 @@ class F5DOAgentManagerRpcCallBackBase(amb.CommonAgentManagerRpcCallBackBase):
         pass
 
     def add_network(self, network_id, network_segment):
-        self.network_map[network_id] = network_segment
+        pass
 
     def network_update(self, context, **kwargs):
-        network_id = kwargs['network']['id']
-        for port_data in self.agent.network_ports[network_id]:
-            self.updated_devices.add(port_data['device'])
+        pass
 
     def port_update(self, context, **kwargs):
         port = kwargs['port']
-        if port['binding:vif_type'] == 'f5' and port['binding:host_id'] == self.agent.mgr.conf.host:
+        if port['binding:vif_type'] == 'f5' and port['binding:host_id'] == self.agent.conf.host:
             LOG.debug("Got Port update for port %s", kwargs['port'])
-            self.agent.mgr._full_sync()
+            self.agent._full_sync()
 
 
-class F5Manager(amb.CommonAgentManagerBase):
+class F5NeutronAgent(object):
     def __init__(self, device_mappings):
-        super(F5Manager, self).__init__()
+        self.last_report_state = 0
+        self.last_full_sync = 0
+        self.last_cleanup = 0
+
         self.device_mappings = device_mappings
-        self.rpc = None
         self.conf = cfg.CONF
         self.host = self.conf.host
-        self.plugin_rpc = F5DOPluginAPI(constants.TOPIC, self.host)
-        self.ctx = context.get_admin_context_without_session()
         self.devices = []
+        self.port_up_ids = []
         self.vcmps = []
+        self.polling_interval = self.conf.F5.polling_interval
+
         self._connect()
-        sys.setrecursionlimit(15000)
+        self.agent_state = {
+            'binary': constants.AGENT_BINARY,
+            'host': cfg.CONF.host,
+            'topic': n_const.L2_AGENT_TOPIC,
+            'configurations': self.get_agent_configurations(),
+            'agent_type': constants.AGENT_TYPE_F5,
+            'start_flag': True}
 
+        if self.conf.debug:
+            # OSX workaround
+            sys.setrecursionlimit(15000)
+
+        self.setup_rpc()
         LOG.debug("Ensuring all selfips bound for this agent")
-        #self.plugin_rpc.ensure_selfips_for_agent(self.ctx)
+        self.agent_rpc.ensure_selfips_for_agent(self.context)
 
-        sync_interval = self.conf.F5.sync_interval
-        if sync_interval:
-            self.fullsync = loopingcall.FixedIntervalLoopingCall(
-                self._full_sync)
-            self.fullsync.start(
-                interval=sync_interval,
-                stop_on_exception=False)
+    def setup_rpc(self):
+        self.context = context.get_admin_context_without_session()
+        self.agent_id = '{}-{}'.format(constants.AGENT_BINARY, self.host)
+        self.topic = topics.AGENT
+        self.rpc_callback = F5AgentRpcCallBack(self)
+        self.endpoints = [self.rpc_callback]
+        self.agent_rpc = F5PluginAPI(constants.TOPIC, self.host)
+        self.plugin_rpc = agent_rpc.PluginApi(topics.PLUGIN)
+        self.state_rpc = agent_rpc.PluginReportStateAPI(topics.REPORTS)
 
-        self.cleanup = loopingcall.FixedIntervalLoopingCall(
-            self.plugin_rpc.cleanup_selfips_for_agent, self.ctx,
-            dry_run=not self.conf.F5.cleanup)
-        self.cleanup.start(
-            interval=600,
+        # Define the listening consumers for the agent
+        consumers = [[topics.PORT, topics.UPDATE]]
+        self.connection = agent_rpc.create_consumers(self.endpoints,
+                                                     self.topic,
+                                                     consumers,
+                                                     start_listening=False)
+
+    def run(self):
+        LOG.info('networking-f5-agent initialized, running...')
+        if cfg.CONF.F5.prometheus:
+            start_http_server(8000)
+        self.connection.consume_in_threads()
+        self.sync_loop = loopingcall.FixedIntervalLoopingCall(
+            self.looping_call)
+        self.sync_loop.start(
+            interval=self.polling_interval,
             stop_on_exception=False)
+        self.sync_loop.wait()
+
+    def _report_state(self):
+        try:
+            devices = len(self.get_all_devices())
+            self.agent_state.get('configurations')['devices'] = devices
+            self.state_rpc.report_state(self.context,
+                                        self.agent_state,
+                                        True)
+        except Exception:
+            LOG.exception("Failed reporting state!")
+
 
     def _connect(self):
         self.devices = [driver.DriverManager(
@@ -251,9 +297,6 @@ class F5Manager(amb.CommonAgentManagerBase):
             all_devices.update(device.get_devices())
         return all_devices
 
-    def get_devices_modified_timestamps(self, devices):
-        return dict()
-
     def get_agent_configurations(self):
         return {
             'device_mappings': self.device_mappings,
@@ -263,21 +306,9 @@ class F5Manager(amb.CommonAgentManagerBase):
             },
         }
 
-    def get_agent_id(self):
-        return '{}-{}'.format(constants.AGENT_BINARY, self.host)
-
-    def get_rpc_callbacks(self, context, agent, sg_agent):
-        return F5DOAgentManagerRpcCallBackBase(
-            context, agent, sg_agent)
-
-    def get_rpc_consumers(self):
-        return [[topics.PORT, topics.UPDATE],
-                [topics.PORT, topics.CREATE],
-                [topics.NETWORK, topics.UPDATE]]
-
     @lockutils.synchronized('_f5_full_sync')
     def _full_sync(self):
-        res = self.plugin_rpc.get_selfips_and_vlans(self.ctx)
+        res = self.agent_rpc.get_selfips_and_vlans(self.context)
 
         with watchdog.watch(LOG, "networking-f5 sync loop", logging.ERROR, 60):
             for device in self.devices:
@@ -305,39 +336,35 @@ class F5Manager(amb.CommonAgentManagerBase):
                 LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
                 vcmp.sync_vlan(res['vlans'].copy())
 
-    def ensure_port_admin_state(self, device, admin_state_up):
-        pass
+        port_up_ids = self.get_all_devices()
+        if self.port_up_ids != port_up_ids:
+            self.plugin_rpc.update_device_list(self.context, port_up_ids, [], self.agent_id, self.conf.host)
+            self.port_up_ids = port_up_ids
 
-    def get_extension_driver_type(self):
-        pass
+    def looping_call(self):
+        start = time.time()
 
-    def get_agent_api(self, **kwargs):
-        pass
+        # Report state back to Neutron
+        if start > self.last_report_state + self.conf.AGENT.report_interval:
+            self._report_state()
+            self.last_report_state = start
 
-    def _interface_plugged(self, network_segment, device):
-        return any([host.plug_interface(network_segment, device)
-                    for host in self.devices])
-
-    def plug_interface(
-            self,
-            network_id,
-            network_segment,
-            device,
-            device_owner):
-        LOG.debug("PLUG_INTERFACE: {}".format(device))
-        if not self._interface_plugged(network_segment, device):
+        if start > self.last_full_sync + self.conf.F5.sync_interval:
             self._full_sync()
+            self.last_full_sync = start
 
-        return self._interface_plugged(network_segment, device)
+        if start > self.last_cleanup + self.conf.F5.cleanup_interval:
+            LOG.debug("Running (dry-run=%s) cleanup for agent %s", not self.conf.F5.cleanup, self.host)
+            self.agent_rpc.cleanup_selfips_for_agent(self.context, dry_run=not self.conf.F5.cleanup)
+            self.last_cleanup = start
 
-    def setup_arp_spoofing_protection(self, device, device_details):
-        pass
-
-    def delete_arp_spoofing_protection(self, devices):
-        pass
-
-    def delete_unreferenced_arp_protection(self, current_devices):
-        pass
+        # sleep till end of polling interval
+        elapsed = time.time() - start
+        if elapsed > self.polling_interval:
+            LOG.debug("Loop iteration exceeded interval "
+                      "(%(polling_interval)s vs. %(elapsed)s)!",
+                      {'polling_interval': self.polling_interval,
+                       'elapsed': elapsed})
 
 
 def main():
@@ -355,16 +382,5 @@ def main():
         sys.exit(1)
     LOG.info("Device mappings: %s", device_mappings)
 
-    polling_interval = cfg.CONF.AGENT.polling_interval
-    quitting_rpc_timeout = cfg.CONF.AGENT.quitting_rpc_timeout
-    f5manager = F5Manager(device_mappings)
-    agent = ca.CommonAgentLoop(f5manager,
-                               polling_interval,
-                               quitting_rpc_timeout,
-                               constants.AGENT_TYPE_F5,
-                               constants.AGENT_BINARY)
-
-    LOG.info('networking-f5-agent initialized, starting up...')
-    if cfg.CONF.F5.prometheus:
-        start_http_server(8000)
-    service.launch(cfg.CONF, agent, restart_method='mutate').wait()
+    agent = F5NeutronAgent(device_mappings)
+    agent.run()
