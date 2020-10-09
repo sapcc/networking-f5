@@ -69,9 +69,6 @@ F5_OPTS = [
     cfg.BoolOpt('prometheus',
                 default=True,
                 help=_("Enable prometheus metrics exporter")),
-    cfg.BoolOpt('migration',
-                default=False,
-                help=_("Enable migration mode (disable syncing active devices)")),
     cfg.BoolOpt('cleanup',
                 default=False,
                 help=_("Enable automatic cleanup of selfips (else dry-run)")),
@@ -222,6 +219,7 @@ class F5NeutronAgent(object):
         self.port_up_ids = []
         self.vcmps = []
         self.polling_interval = self.conf.F5.polling_interval
+        self.pool = eventlet.GreenPool()
 
         self._connect()
         self.agent_state = {
@@ -290,6 +288,8 @@ class F5NeutronAgent(object):
         self.vcmps = [F5vCMPBackend(uri, self.device_mappings)
                       for uri in sorted(self.conf.F5_VCMP.devices or
                                         self.conf.F5_VCMP.hosts_guest_mappings.keys())]
+        # Re-patch backend drivers
+        eventlet.monkey_patch()
 
     def get_all_devices(self):
         all_devices = set()
@@ -310,32 +310,25 @@ class F5NeutronAgent(object):
     def _full_sync(self):
         res = self.agent_rpc.get_selfips_and_vlans(self.context)
 
-        with watchdog.watch(LOG, "networking-f5 sync loop", logging.ERROR, 60):
-            for device in self.devices:
-                if cfg.CONF.F5.migration and device.is_active():
-                    LOG.warning("Migration: Skipping active F5 device %s", device.get_host())
-                    continue
+        for device in self.devices:
+            LOG.debug("Syncing F5 device %s", device.get_host())
+            self.pool.spawn_n(
+                device.sync_all, vlans=res.get('vlans', {}).copy(),
+                selfips={
+                    key: val for key, val in res.get(
+                        'selfips',
+                        {}).items() if
+                    device.get_host() == val.get('host', None)
+                })
 
-                LOG.debug("Syncing F5 device %s", device.get_host())
-                device.sync_all(
-                    vlans=res.get('vlans', {}).copy(),
-                    selfips={
-                        key: val for key, val in res.get(
-                            'selfips',
-                            {}).items() if
-                        device.get_host() == val.get('host', None)
-                    })
+        for vcmp in self.vcmps:
+            LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
+            self.pool.spawn_n(vcmp.sync_vlan, res['vlans'].copy())
 
-            for vcmp in self.vcmps:
-                if cfg.CONF.F5.migration:
-                    active_devices = [device.device.hostname for device in self.devices
-                                      if device.is_active()]
-                    if vcmp.vcmp_guest in active_devices:
-                        LOG.warning("Migration: Skipping active F5 device %s", vcmp.vcmp_host)
-                        continue
-                LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
-                vcmp.sync_vlan(res['vlans'].copy())
+        with watchdog.watch(LOG, "networking-f5 sync loop", logging.ERROR, 90):
+            self.pool.waitall()
 
+        LOG.debug("Sync loop finished")
         port_up_ids = self.get_all_devices()
         if self.port_up_ids != port_up_ids:
             self.plugin_rpc.update_device_list(self.context, port_up_ids, [], self.agent_id, self.conf.host)
