@@ -42,7 +42,9 @@ from neutron_lib.utils import helpers
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
 eventlet.monkey_patch()
 
+FIVE_MINUTES = 5 * 60
 LOG = logging.getLogger(__name__)
+last_full_sync = .0
 
 F5_OPTS = [
     cfg.StrOpt('backend',
@@ -53,9 +55,6 @@ F5_OPTS = [
                  help=_('Seconds between full sync.')),
     cfg.FloatOpt('cleanup_interval', default=600,
                  help=_('Seconds between selfip cleanups.')),
-    cfg.IntOpt('polling_interval', default=5,
-               help=_("The number of seconds the agent will wait between "
-                      "polling for local device changes.")),
     cfg.ListOpt('physical_device_mappings',
                 default=[],
                 help=_("List of <physical_network>:<device_interface>.")),
@@ -208,17 +207,12 @@ class F5AgentRpcCallBack(object):
 
 class F5NeutronAgent(object):
     def __init__(self, device_mappings):
-        self.last_report_state = 0
-        self.last_full_sync = 0
-        self.last_cleanup = 0
-
         self.device_mappings = device_mappings
         self.conf = cfg.CONF
         self.host = self.conf.host
         self.devices = []
         self.port_up_ids = []
         self.vcmps = []
-        self.polling_interval = self.conf.F5.polling_interval
         self.pool = eventlet.GreenPool()
 
         self._connect()
@@ -260,15 +254,25 @@ class F5NeutronAgent(object):
         if cfg.CONF.F5.prometheus:
             start_http_server(8000)
         self.connection.consume_in_threads()
-        self.sync_loop = loopingcall.FixedIntervalLoopingCall(
-            self.looping_call)
-        self.sync_loop.start(
-            interval=self.polling_interval,
+        heartbeat = loopingcall.FixedIntervalLoopingCall(self._report_state)
+        heartbeat.start(
+            interval=self.conf.AGENT.report_interval,
+            initial_delay=self.conf.AGENT.report_interval,
             stop_on_exception=False)
-        self.sync_loop.wait()
+        cleanup = loopingcall.FixedIntervalLoopingCall(self._cleanup)
+        cleanup.start(interval=self.conf.F5.cleanup_interval)
+        sync_loop = loopingcall.FixedIntervalLoopingCall(self._full_sync)
+        sync_loop.start(interval=self.conf.F5.sync_interval, stop_on_exception=False)
+        sync_loop.wait()
 
     def _report_state(self):
+        if last_full_sync < time.time() - FIVE_MINUTES:
+            LOG.warning("Last sync loop outlasted for more than five minutes (%s), skipping report",
+                        time.localtime(last_full_sync))
+            return
+
         try:
+            # Sync-Loop completed, report state
             devices = len(self.get_all_devices())
             self.agent_state.get('configurations')['devices'] = devices
             self.state_rpc.report_state(self.context,
@@ -276,7 +280,6 @@ class F5NeutronAgent(object):
                                         True)
         except Exception:
             LOG.exception("Failed reporting state!")
-
 
     def _connect(self):
         self.devices = [driver.DriverManager(
@@ -327,6 +330,8 @@ class F5NeutronAgent(object):
 
         with watchdog.watch(LOG, "networking-f5 sync loop", logging.ERROR, 90):
             self.pool.waitall()
+            global last_full_sync
+            last_full_sync = time.time()
 
         LOG.debug("Sync loop finished")
         port_up_ids = self.get_all_devices()
@@ -334,30 +339,9 @@ class F5NeutronAgent(object):
             self.plugin_rpc.update_device_list(self.context, port_up_ids, [], self.agent_id, self.conf.host)
             self.port_up_ids = port_up_ids
 
-    def looping_call(self):
-        start = time.time()
-
-        # Report state back to Neutron
-        if start > self.last_report_state + self.conf.AGENT.report_interval:
-            self._report_state()
-            self.last_report_state = start
-
-        if start > self.last_full_sync + self.conf.F5.sync_interval:
-            self._full_sync()
-            self.last_full_sync = start
-
-        if start > self.last_cleanup + self.conf.F5.cleanup_interval:
-            LOG.debug("Running (dry-run=%s) cleanup for agent %s", not self.conf.F5.cleanup, self.host)
-            self.agent_rpc.cleanup_selfips_for_agent(self.context, dry_run=not self.conf.F5.cleanup)
-            self.last_cleanup = start
-
-        # sleep till end of polling interval
-        elapsed = time.time() - start
-        if elapsed > self.polling_interval:
-            LOG.debug("Loop iteration exceeded interval "
-                      "(%(polling_interval)s vs. %(elapsed)s)!",
-                      {'polling_interval': self.polling_interval,
-                       'elapsed': elapsed})
+    def _cleanup(self):
+        LOG.debug("Running (dry-run=%s) cleanup for agent %s", not self.conf.F5.cleanup, self.host)
+        self.agent_rpc.cleanup_selfips_for_agent(self.context, dry_run=not self.conf.F5.cleanup)
 
 
 def main():
