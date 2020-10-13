@@ -37,16 +37,8 @@ RETRY_MAX = 3
 PROM_ACTION = Counter('networking_f5_action',
                       'Update/Creations/Deletion of l2 entities', ['type', 'action'])
 REQUEST_SYNC_EXCEPTIONS = Counter('networking_f5_sync_exceptions', 'Sync exception count', ['type'])
-REQUEST_TIME_SYNC_ROUTES = Summary(
-    'networking_f5_sync_routes_seconds', 'Time spent processing routes')
-REQUEST_TIME_SYNC_VLANS = Summary(
-    'networking_f5_sync_vlan_seconds', 'Time spent processing vlans')
-REQUEST_TIME_SYNC_SELFIPS = Summary(
-    'networking_f5_sync_selfip_seconds', 'Time spent processing selfips')
-REQUEST_TIME_SYNC_ROUTEDOMAINS = Summary(
-    'networking_f5_sync_routedomains_seconds', 'Time spent processing routedomains')
-REQUEST_TIME_SYNC_ALL = Summary(
-    'networking_f5_sync_all', 'Time spent processing sync_all')
+REQUEST_TIME_SYNC = Summary('networking_f5_sync_seconds', 'Time spent processing entities',
+                            ['type'])
 
 
 class F5iControlRestBackend(F5Backend):
@@ -127,7 +119,6 @@ class F5iControlRestBackend(F5Backend):
         o = getattr(o, o_type).load(name=name)
         o.delete()
 
-    @REQUEST_TIME_SYNC_VLANS.time()
     def _sync_vlans(self, vlans):
         orphaned = []
         new_vlans = self._prefix_vlans(vlans)
@@ -179,7 +170,6 @@ class F5iControlRestBackend(F5Backend):
 
         return orphaned
 
-    @REQUEST_TIME_SYNC_SELFIPS.time()
     def _sync_selfips(self, selfips):
         orphaned = []
         def convert_ip(selfip):
@@ -249,7 +239,6 @@ class F5iControlRestBackend(F5Backend):
             PROM_ACTION.labels(type='selfip', action='create').inc()
         return orphaned
 
-    @REQUEST_TIME_SYNC_ROUTEDOMAINS.time()
     def _sync_routedomains(self, vlans):
         orphaned = []
         prefixed_nets = self._prefix(vlans, constants.PREFIX_NET)
@@ -291,7 +280,6 @@ class F5iControlRestBackend(F5Backend):
                     pass
         return orphaned
 
-    @REQUEST_TIME_SYNC_ROUTES.time()
     def _sync_routes(self, selfips):
         orphaned = []
         # We only need one route per network, remove larger gateway IPs
@@ -352,48 +340,53 @@ class F5iControlRestBackend(F5Backend):
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)
     )
-    @REQUEST_TIME_SYNC_ALL.time()
     def sync_all(self, vlans, selfips):
         orphaned = {}
         try:
             LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
-            with REQUEST_SYNC_EXCEPTIONS.labels(type='vlan').count_exceptions():
-                orphaned['vlan'] = self._sync_vlans(vlans)
+            with REQUEST_TIME_SYNC.labels(type='vlan').time():
+                with REQUEST_SYNC_EXCEPTIONS.labels(type='vlan').count_exceptions():
+                    orphaned['vlan'] = self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
-            with REQUEST_SYNC_EXCEPTIONS.labels(type='routedomain').count_exceptions():
-                orphaned['routedomain'] = self._sync_routedomains(vlans)
+            with REQUEST_TIME_SYNC.labels(type='routedomain').time():
+                with REQUEST_SYNC_EXCEPTIONS.labels(type='routedomain').count_exceptions():
+                    orphaned['routedomain'] = self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in selfips.values()])
-            with REQUEST_SYNC_EXCEPTIONS.labels(type='selfip').count_exceptions():
-                orphaned['selfip'] = self._sync_selfips(selfips)
+            with REQUEST_TIME_SYNC.labels(type='selfip').time():
+                with REQUEST_SYNC_EXCEPTIONS.labels(type='selfip').count_exceptions():
+                    orphaned['selfip'] = self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         try:
             LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()
                                             if selfip['gateway_ip']])
-            with REQUEST_SYNC_EXCEPTIONS.labels(type='route').count_exceptions():
-                orphaned['route'] = self._sync_routes(selfips)
+            with REQUEST_TIME_SYNC.labels(type='route').time():
+                with REQUEST_SYNC_EXCEPTIONS.labels(type='route').count_exceptions():
+                    orphaned['route'] = self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             LOG.exception(e)
 
         # Cleanup should happen in reverse order
-        for object_type in ['route', 'selfip', 'routedomain', 'vlan']:
-            if object_type in orphaned and len(orphaned[object_type]) > 0:
-                LOG.info("Cleaning up orphaned %s: %s", object_type, [o.name for o in orphaned[object_type]])
-                for o in orphaned[object_type]:
-                    try:
-                        PROM_ACTION.labels(type=object_type, action='delete').inc()
-                        o.delete()
-                    except iControlUnexpectedHTTPError as e:
-                        LOG.exception(e)
+        with REQUEST_TIME_SYNC.labels(type='cleanup').time():
+            for object_type in ['route', 'selfip', 'routedomain', 'vlan']:
+                if object_type in orphaned and len(orphaned[object_type]) > 0:
+                    LOG.info("Cleaning up orphaned %s: %s", object_type, [o.name for o in orphaned[object_type]])
+                    for o in orphaned[object_type]:
+                        try:
+                            PROM_ACTION.labels(type=object_type, action='delete').inc()
+                            with REQUEST_SYNC_EXCEPTIONS.labels(type=object_type).count_exceptions():
+                                o.delete()
+                        except iControlUnexpectedHTTPError as e:
+                            LOG.exception(e)
 
     def plug_interface(self, network_segment, device):
 

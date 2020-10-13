@@ -20,7 +20,6 @@ import eventlet
 import oslo_messaging
 import six
 from oslo_concurrency import lockutils
-from oslo_concurrency import watchdog
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_service import loopingcall
@@ -268,9 +267,9 @@ class F5NeutronAgent(object):
         sync_loop.wait()
 
     def _report_state(self):
-        if last_full_sync < time.time() - FIVE_MINUTES:
+        if 0 < last_full_sync < time.time() - FIVE_MINUTES:
             LOG.warning("Last sync loop outlasted for more than five minutes (%s), skipping report",
-                        time.localtime(last_full_sync))
+                        time.strftime("%c", time.localtime(last_full_sync)))
             return
 
         try:
@@ -330,10 +329,9 @@ class F5NeutronAgent(object):
             LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
             self.pool.spawn_n(vcmp.sync_vlan, res['vlans'].copy())
 
-        with watchdog.watch(LOG, "networking-f5 sync loop", logging.ERROR, 90):
-            self.pool.waitall()
-            global last_full_sync
-            last_full_sync = time.time()
+        global last_full_sync
+        self.pool.waitall()
+        last_full_sync = time.time()
 
         LOG.debug("Sync loop finished")
         port_up_ids = self.get_all_devices()
