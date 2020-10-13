@@ -83,7 +83,7 @@ class F5vCMPBackend(object):
         v = self.mgmt.tm.net.vlans
         orig_vlans = {'{}{}'.format(constants.PREFIX_VLAN, val['tag']): val
                       for val in list(vlans.values())}
-        for old_vlan in v.get_collection():
+        for old_vlan in v.get_collection(requests_params={'params': {'expandSubcollections': 'true'}}):
 
             # Migration case
             if old_vlan.name.startswith('net-'):
@@ -111,8 +111,8 @@ class F5vCMPBackend(object):
                     old_vlan.syncacheThreshold = CONF.F5.syncache_threshold
                     old_vlan.update()
 
-                if not old_vlan.interfaces_s.interfaces.exists(
-                    name=self.mappings[vlan['physical_network']]):
+                interface_names = [interface['name'] for interface in old_vlan.interfacesReference.get('items', [])]
+                if self.mappings[vlan['physical_network']] not in interface_names:
                     old_vlan.interfaces_s.interfaces.create(
                         tagged=True,
                         name=self.mappings[vlan['physical_network']],
