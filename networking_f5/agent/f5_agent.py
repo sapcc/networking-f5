@@ -202,10 +202,10 @@ class F5AgentRpcCallBack(object):
 
     def port_update(self, context, **kwargs):
         port = kwargs['port']
-        if (port['binding:vif_type'] == 'f5' and
+        if (port['device_owner'] == constants.DEVICE_OWNER_SELFIP and
                 port['binding:host_id'] == self.agent.conf.host and
                 port['status'] == 'ACTIVE'):
-            LOG.debug("Got Port update for port %s", kwargs['port'])
+            LOG.debug("Got Port update for self ip %s", kwargs['port'])
             self.agent._full_sync()
 
 
