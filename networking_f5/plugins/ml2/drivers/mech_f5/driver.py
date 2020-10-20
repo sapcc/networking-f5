@@ -159,8 +159,9 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
     def update_port_postcommit(self, context):
         plugin_context = context._plugin_context
 
-        # skip Self-IP
+        # skip Self-IP, but notify agent
         if context.current['device_owner'] == constants.DEVICE_OWNER_SELFIP:
+            self._notify_port_updated(context)
             return
 
         # Only accept listener_ips
