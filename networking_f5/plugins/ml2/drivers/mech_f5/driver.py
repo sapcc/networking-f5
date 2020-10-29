@@ -78,6 +78,32 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         return agent['configurations'].get(
             'device_mappings', {})
 
+    def bind_port(self, context):
+        LOG.debug("Attempting to bind port %(port)s on "
+                  "network %(network)s",
+                  {'port': context.current['id'],
+                   'network': context.network.current['id']})
+        vnic_type = context.current.get(portbindings.VNIC_TYPE,
+                                        portbindings.VNIC_NORMAL)
+        if vnic_type not in self.supported_vnic_types:
+            LOG.debug("Refusing to bind due to unsupported vnic_type: %s",
+                      vnic_type)
+            return
+        agents = context.host_agents(self.agent_type)
+        if not agents:
+            LOG.debug("Port %(pid)s on network %(network)s not bound, "
+                      "no agent of type %(at)s registered on host %(host)s",
+                      {'pid': context.current['id'],
+                       'at': self.agent_type,
+                       'network': context.network.current['id'],
+                       'host': context.host})
+        for agent in agents:
+            for segment in context.segments_to_bind:
+                if self.try_to_bind_segment_for_agent(context, segment,
+                                                      agent):
+                    LOG.debug("Bound using segment: %s", segment)
+                    return
+
     @staticmethod
     def _make_selfip_dict(listener_port, device_id, description):
         fixed_ip = listener_port['fixed_ips'][0]
