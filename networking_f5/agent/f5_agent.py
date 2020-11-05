@@ -204,7 +204,7 @@ class F5AgentRpcCallBack(object):
         port = kwargs['port']
         if (port['device_owner'] == constants.DEVICE_OWNER_SELFIP and
                 port['binding:host_id'] == self.agent.conf.host and
-                port['status'] == 'ACTIVE'):
+                port['status'] == 'DOWN'):
             LOG.debug("Got Port update for self ip %s", kwargs['port'])
             self.agent._full_sync()
 
