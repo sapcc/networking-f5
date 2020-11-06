@@ -22,7 +22,7 @@ from prometheus_client import Summary, Counter
 from requests import Timeout, ConnectionError
 from six.moves.urllib import parse
 from tenacity import retry_if_exception_type, retry, \
-    wait_incrementing, stop_after_attempt
+    wait_incrementing, stop_after_attempt, TryAgain
 
 from networking_f5 import constants
 from networking_f5.agent.f5_agent import F5Backend
@@ -334,6 +334,16 @@ class F5iControlRestBackend(F5Backend):
 
         return orphaned
 
+    def _check_exception(self, ex):
+        retryable = ['There is an active asynchronous task executing.']
+        ignorable = ['Not Found for uri:']
+        if any(x in str(ex) for x in retryable):
+            raise TryAgain
+        elif any(x in str(ex) for x in ignorable):
+            pass
+        else:
+            LOG.exception(ex)
+
     @retry(
         retry=retry_if_exception_type((Timeout, ConnectionError)),
         wait=wait_incrementing(
@@ -348,7 +358,7 @@ class F5iControlRestBackend(F5Backend):
                 with REQUEST_SYNC_EXCEPTIONS.labels(type='vlan').count_exceptions():
                     orphaned['vlan'] = self._sync_vlans(vlans)
         except iControlUnexpectedHTTPError as e:
-            LOG.exception(e)
+            self._check_exception(e)
 
         try:
             LOG.debug("Syncing routedomains %s", [vlan['tag'] for vlan in vlans.values()])
@@ -356,7 +366,7 @@ class F5iControlRestBackend(F5Backend):
                 with REQUEST_SYNC_EXCEPTIONS.labels(type='routedomain').count_exceptions():
                     orphaned['routedomain'] = self._sync_routedomains(vlans)
         except iControlUnexpectedHTTPError as e:
-            LOG.exception(e)
+            self._check_exception(e)
 
         try:
             LOG.debug("Syncing selfips %s", [selfip['ip_address'] for selfip in selfips.values()])
@@ -364,7 +374,7 @@ class F5iControlRestBackend(F5Backend):
                 with REQUEST_SYNC_EXCEPTIONS.labels(type='selfip').count_exceptions():
                     orphaned['selfip'] = self._sync_selfips(selfips)
         except iControlUnexpectedHTTPError as e:
-            LOG.exception(e)
+            self._check_exception(e)
 
         try:
             LOG.debug("Syncing routes %s", [selfip['gateway_ip'] for selfip in selfips.values()
@@ -373,7 +383,7 @@ class F5iControlRestBackend(F5Backend):
                 with REQUEST_SYNC_EXCEPTIONS.labels(type='route').count_exceptions():
                     orphaned['route'] = self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
-            LOG.exception(e)
+            self._check_exception(e)
 
         # Cleanup should happen in reverse order
         with REQUEST_TIME_SYNC.labels(type='cleanup').time():
@@ -386,7 +396,7 @@ class F5iControlRestBackend(F5Backend):
                             with REQUEST_SYNC_EXCEPTIONS.labels(type=object_type).count_exceptions():
                                 o.delete()
                         except iControlUnexpectedHTTPError as e:
-                            LOG.exception(e)
+                            self._check_exception(e)
 
     def plug_interface(self, network_segment, device):
 
