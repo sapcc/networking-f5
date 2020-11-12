@@ -28,7 +28,7 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_service import loopingcall
-from prometheus_client import start_http_server
+from prometheus_client import start_http_server, Counter
 from stevedore import driver
 
 from networking_f5 import constants
@@ -41,6 +41,7 @@ from neutron.conf.agent import common as agent_config
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
 eventlet.monkey_patch()
 
+FULL_SYNC_EXCEPTIONS = Counter('networking_f5_full_sync_exceptions', 'Full Sync exception count')
 FIVE_MINUTES = 5 * 60
 LOG = logging.getLogger(__name__)
 last_full_sync = .0
@@ -132,6 +133,10 @@ class F5Backend(object):
     @abc.abstractmethod
     def sync_all(self, vlans, selfips):
         """Sync all selfips and vlans to F5 L2"""
+
+    @abc.abstractmethod
+    def rd_in_use(self):
+        """Get all RDs in use"""
 
     @abc.abstractmethod
     def get_devices(self):
@@ -317,8 +322,21 @@ class F5NeutronAgent(object):
         }
 
     @lockutils.synchronized('_f5_full_sync')
+    @FULL_SYNC_EXCEPTIONS.count_exceptions()
     def _full_sync(self):
         res = self.agent_rpc.get_selfips_and_vlans(self.context)
+
+        # Safeguard for RDs in use
+        rds_in_use = set()
+        for device in self.devices:
+            rds_in_use.update(device.rd_in_use())
+
+        only_zero = set()
+        only_zero.update(rds_in_use - set(vlan['tag'] for vlan in res.get('vlans', {}).values()))
+        only_zero.update(rds_in_use - set(vlan['tag'] for vlan in res.get('selfips', {}).values()))
+        # We excpect only default route domain 0 to be in the list of "in-use route domains to delete"
+        if not 0 in only_zero or len(only_zero) > 1:
+            raise Exception('SAFEGUARD: in-use route-id(s) {} would be deleted, aborting sync'.format(only_zero))
 
         for device in self.devices:
             LOG.debug("Syncing F5 device %s", device.get_host())

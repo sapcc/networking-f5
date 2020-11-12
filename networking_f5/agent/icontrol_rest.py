@@ -353,6 +353,20 @@ class F5iControlRestBackend(F5Backend):
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)
     )
+    def rd_in_use(self):
+        try:
+            partitions = self.mgmt.tm.auth.partitions
+            return [partition.defaultRouteDomain for partition in partitions.get_collection()]
+        except iControlUnexpectedHTTPError as e:
+            self._check_exception(e)
+            return []
+
+    @retry(
+        retry=retry_if_exception_type((Timeout, ConnectionError)),
+        wait=wait_incrementing(
+            RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
+        stop=stop_after_attempt(RETRY_ATTEMPTS)
+    )
     def sync_all(self, vlans, selfips):
         orphaned = {}
         try:
