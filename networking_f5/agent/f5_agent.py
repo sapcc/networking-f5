@@ -128,7 +128,7 @@ class F5Backend(object):
         """Constructor."""
 
     @abc.abstractmethod
-    def sync_all(self, vlans, selfips):
+    def sync_all(self, vlans, selfips, rds_in_use):
         """Sync all selfips and vlans to F5 L2"""
 
     @abc.abstractmethod
@@ -325,23 +325,19 @@ class F5NeutronAgent(object):
         for device in self.devices:
             rds_in_use.update(device.rd_in_use())
 
-        only_zero = set()
-        only_zero.update(rds_in_use - set(vlan['tag'] for vlan in res.get('vlans', {}).values()))
-        only_zero.update(rds_in_use - set(vlan['tag'] for vlan in res.get('selfips', {}).values()))
-        # We excpect only default route domain 0 to be in the list of "in-use route domains to delete"
-        if not 0 in only_zero or len(only_zero) > 1:
-            raise Exception('SAFEGUARD: in-use route-id(s) {} would be deleted, aborting sync'.format(only_zero))
-
         for device in self.devices:
             LOG.debug("Syncing F5 device %s", device.get_host())
             self.pool.spawn_n(
-                device.sync_all, vlans=res.get('vlans', {}).copy(),
+                device.sync_all,
+                vlans=res.get('vlans', {}).copy(),
                 selfips={
                     key: val for key, val in res.get(
                         'selfips',
                         {}).items() if
                     device.get_host() == val.get('host', None)
-                })
+                },
+                rds_in_use=rds_in_use
+            )
 
         for vcmp in self.vcmps:
             LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
