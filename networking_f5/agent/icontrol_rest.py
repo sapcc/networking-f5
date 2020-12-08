@@ -367,7 +367,7 @@ class F5iControlRestBackend(F5Backend):
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)
     )
-    def sync_all(self, vlans, selfips):
+    def sync_all(self, vlans, selfips, rds_in_use):
         orphaned = {}
         try:
             LOG.debug("Syncing vlans %s", [vlan['tag'] for vlan in vlans.values()])
@@ -401,6 +401,12 @@ class F5iControlRestBackend(F5Backend):
                     orphaned['route'] = self._sync_routes(selfips)
         except iControlUnexpectedHTTPError as e:
             self._check_exception(e)
+
+        if 'routedomain' in orphaned:
+            orphans_in_use = rds_in_use.intersection([rd.id for rd in orphaned['routedomain']])
+            if orphans_in_use:
+                LOG.info("Skipping cleanup since RDs %s still in use", orphans_in_use)
+                return
 
         # Cleanup should happen in reverse order
         with REQUEST_TIME_SYNC.labels(type='cleanup').time():
