@@ -55,6 +55,8 @@ F5_OPTS = [
                  help=_('Seconds between full sync.')),
     cfg.FloatOpt('cleanup_interval', default=600,
                  help=_('Seconds between selfip cleanups.')),
+    cfg.FloatOpt('selfip_interval', default=1200,
+                 help=_('Seconds between selfip sync.')),
     cfg.ListOpt('physical_device_mappings',
                 default=[],
                 help=_("List of <physical_network>:<device_interface>.")),
@@ -240,8 +242,6 @@ class F5NeutronAgent(object):
             sys.setrecursionlimit(15000)
 
         self.setup_rpc()
-        LOG.debug("Ensuring all selfips bound for this agent")
-        self.agent_rpc.ensure_selfips_for_agent(self.context)
 
     def setup_rpc(self):
         self.context = context.get_admin_context_without_session()
@@ -272,6 +272,8 @@ class F5NeutronAgent(object):
             stop_on_exception=False)
         cleanup = loopingcall.FixedIntervalLoopingCall(self._cleanup)
         cleanup.start(interval=self.conf.F5.cleanup_interval)
+        ensure_selfip = loopingcall.FixedIntervalLoopingCall(self._ensure_selfips)
+        ensure_selfip.start(interval=self.conf.F5.selfip_interval)
         sync_loop = loopingcall.FixedIntervalLoopingCall(self._full_sync)
         sync_loop.start(interval=self.conf.F5.sync_interval, stop_on_exception=False)
         sync_loop.wait()
@@ -361,6 +363,10 @@ class F5NeutronAgent(object):
     def _cleanup(self):
         LOG.debug("Running (dry-run=%s) cleanup for agent %s", not self.conf.F5.cleanup, self.host)
         self.agent_rpc.cleanup_selfips_for_agent(self.context, dry_run=not self.conf.F5.cleanup)
+
+    def _ensure_selfips(self):
+        LOG.debug("Running ensure_selfips for agent %s", self.host)
+        self.agent_rpc.ensure_selfips_for_agent(self.context)
 
 
 def main():
