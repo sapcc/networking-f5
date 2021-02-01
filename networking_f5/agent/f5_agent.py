@@ -204,7 +204,12 @@ class F5AgentRpcCallBack(object):
 
     def port_update(self, context, **kwargs):
         port = kwargs['port']
-        if (port['device_owner'] == constants.DEVICE_OWNER_SELFIP and
+        if (port['device_owner'] == constants.DEVICE_OWNER_LISTENER and
+                port['binding:host_id'] == self.agent.conf.host and
+                port['status'] == 'ACTIVE'):
+            LOG.debug("Got Port update for VIP %s, ensuring selfips", kwargs['port'])
+            self.agent.agent_rpc.ensure_selfips_for_agent(self.agent.context)
+        elif (port['device_owner'] == constants.DEVICE_OWNER_SELFIP and
                 port['binding:host_id'] == self.agent.conf.host and
                 port['status'] == 'DOWN'):
             LOG.debug("Got Port update for self ip %s", kwargs['port'])

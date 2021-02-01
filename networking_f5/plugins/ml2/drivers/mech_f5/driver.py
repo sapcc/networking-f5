@@ -210,21 +210,22 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                 "driver only supports one ip/port".format(
                     context.current['id']))
 
-        # look for a living agent before provisioning selfips
-        agents = context.host_agents(constants.AGENT_TYPE_F5)
-        if len(agents) != 1:
-            LOG.warning(
-                "Couldn't create selfips for port '%s' "
-                "since agents hosted in '%s' not found, "
-                "will be eventually picked up by reconsiliation loop",
-                context.host,
-                context.current['id'])
-            return
+        # Let agent ignite selfip creation
+        # # look for a living agent before provisioning selfips
+        # agents = context.host_agents(constants.AGENT_TYPE_F5)
+        # if len(agents) != 1:
+        #     LOG.warning(
+        #         "Couldn't create selfips for port '%s' "
+        #         "since agents hosted in '%s' not found, "
+        #         "will be eventually picked up by reconsiliation loop",
+        #         context.host,
+        #         context.current['id'])
+        #     return
 
-        selfips = self._ensure_selfips(context)
-        LOG.debug("Created selfip ports %s for listener %s",
-                  [selfip['id'] for selfip in selfips],
-                  context.current['id'])
+        # selfips = self._ensure_selfips(context)
+        # LOG.debug("Created selfip ports %s for listener %s",
+        #           [selfip['id'] for selfip in selfips],
+        #           context.current['id'])
 
         self._notify_port_updated(context)
         provisioning_blocks.provisioning_complete(
