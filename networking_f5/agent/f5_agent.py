@@ -267,6 +267,7 @@ class F5NeutronAgent(object):
     def run(self):
         LOG.info('networking-f5-agent initialized, running...')
         if cfg.CONF.F5.prometheus:
+            LOG.info('Exposing Prometheus metrics on port 8000')
             start_http_server(8000)
         self.connection.consume_in_threads()
         heartbeat = loopingcall.FixedIntervalLoopingCall(self._report_state)

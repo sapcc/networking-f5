@@ -13,6 +13,7 @@
 # under the License.
 
 import sys
+import time
 from collections import defaultdict
 
 import netaddr
@@ -26,7 +27,7 @@ from tenacity import retry_if_exception_type, retry, \
     wait_incrementing, stop_after_attempt, TryAgain
 
 from networking_f5 import constants
-from networking_f5.agent.f5_agent import F5Backend
+from networking_f5.agent.f5_agent import F5Backend, FIVE_MINUTES
 
 LOG = logging.getLogger(__name__)
 
@@ -53,6 +54,8 @@ class F5iControlRestBackend(F5Backend):
         self.devices = []  # SelfIP Ports
         self.device_mappings = device_mappings
         self.mgmt = None
+        self.active_check = 0
+        self.active = False
         self._login()
 
     def _login(self):
@@ -84,6 +87,10 @@ class F5iControlRestBackend(F5Backend):
         return self.device.hostname
 
     def is_active(self):
+        # Check only every five minutes for active device to decrease API load
+        if self.active_check > time.time() - FIVE_MINUTES:
+            return self.active
+
         def get_device_name(bigip):
             devices = bigip.tm.cm.devices.get_collection()
             for device in devices:
@@ -94,7 +101,9 @@ class F5iControlRestBackend(F5Backend):
 
         act = self.mgmt.tm.cm.devices.device.load(
             name=get_device_name(self.mgmt), partition='Common')
-        return act.failoverState.lower() == 'active'
+        self.active = act.failoverState.lower() == 'active'
+        self.active_check = time.time()
+        return self.active
 
     @staticmethod
     def _prefix(collection, prefix, replace_hyphen=False):
@@ -284,6 +293,10 @@ class F5iControlRestBackend(F5Backend):
         return orphaned
 
     def _sync_routes(self, selfips):
+        # Sync Routes only on active device because routes are synced
+        if not self.is_active():
+            return []
+
         orphaned = []
         # We only need one route per network, remove larger gateway IPs
         tmp = defaultdict(list)
