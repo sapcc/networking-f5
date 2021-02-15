@@ -42,6 +42,7 @@ from neutron.conf.agent import common as agent_config
 eventlet.monkey_patch()
 
 FULL_SYNC_EXCEPTIONS = Counter('networking_f5_full_sync_exceptions', 'Full Sync exception count')
+SYNC_ITERATIONS = Counter('networking_f5_sync_iteration', 'Sync iterations', ['type'])
 FIVE_MINUTES = 5 * 60
 LOG = logging.getLogger(__name__)
 last_full_sync = .0
@@ -361,6 +362,7 @@ class F5NeutronAgent(object):
         last_full_sync = time.time()
 
         LOG.debug("Sync loop finished")
+        SYNC_ITERATIONS.labels('full_sync').inc()
         port_up_ids = self.get_all_devices()
         if self.port_up_ids != port_up_ids:
             self.plugin_rpc.update_device_list(self.context, port_up_ids, [],
@@ -372,10 +374,12 @@ class F5NeutronAgent(object):
                   not self.conf.F5.cleanup, self.host)
         self.agent_rpc.cleanup_selfips_for_agent(
             self.context, dry_run=not self.conf.F5.cleanup)
+        SYNC_ITERATIONS.labels('cleanup').inc()
 
     def _ensure_selfips(self):
         LOG.debug("Running ensure_selfips for agent %s", self.host)
         self.agent_rpc.ensure_selfips_for_agent(self.context)
+        SYNC_ITERATIONS.labels('ensure_selfips').inc()
 
 
 def main():
