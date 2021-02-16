@@ -20,6 +20,8 @@ from neutron_lib.plugins import directory
 from oslo_log import log as logging
 
 from networking_f5 import constants
+from neutron_lib.plugins import directory
+from neutron_lib import exceptions
 
 LOG = logging.getLogger(__name__)
 
@@ -143,9 +145,12 @@ class F5DORpcCallback(object):
                 if not listener.get('name', '').startswith('loadbalancer-'):
                     continue
 
-            self.f5plugin._ensure_selfips(
-                ListenerContext(listener, self.plugin, context, host)
-            )
+            try:
+                self.f5plugin._ensure_selfips(
+                    ListenerContext(listener, self.plugin, context, host)
+                )
+            except exceptions.IpAddressGenerationFailure as e:
+                LOG.error(e)
 
     def cleanup_selfips_for_agent(self, context, **kwargs):
         host = kwargs.get('host')
