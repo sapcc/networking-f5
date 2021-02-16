@@ -181,12 +181,12 @@ class F5PluginAPI(object):
 
     def ensure_selfips_for_agent(self, context, **kwargs):
         cctxt = self.client.prepare()
-        return cctxt.call(context, 'ensure_selfips_for_agent',
+        return cctxt.cast(context, 'ensure_selfips_for_agent',
                           host=self.host, **kwargs)
 
     def cleanup_selfips_for_agent(self, context, **kwargs):
         cctxt = self.client.prepare()
-        return cctxt.call(context, 'cleanup_selfips_for_agent',
+        return cctxt.cast(context, 'cleanup_selfips_for_agent',
                           host=self.host, **kwargs)
 
 
