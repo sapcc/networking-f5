@@ -415,11 +415,11 @@ class F5iControlRestBackend(F5Backend):
         except iControlUnexpectedHTTPError as e:
             self._check_exception(e)
 
-        if 'routedomain' in orphaned:
-            orphans_in_use = rds_in_use.intersection([rd.id for rd in orphaned['routedomain']])
-            if orphans_in_use:
-                LOG.info("Skipping cleanup since RDs %s still in use", orphans_in_use)
-                return
+        #if 'routedomain' in orphaned:
+        #    orphans_in_use = rds_in_use.intersection([rd.id for rd in orphaned['routedomain']])
+        #    if orphans_in_use:
+        #        LOG.info("Skipping cleanup since RDs %s still in use", orphans_in_use)
+        #        return
 
         # Cleanup should happen in reverse order
         with REQUEST_TIME_SYNC.labels(type='cleanup').time():
