@@ -65,7 +65,7 @@ class F5DORpcCallback(object):
             if not port.binding_levels:
                 LOG.warning("No bindings for port %s (network %s) found, "
                             "cannot configure F5 layer2 access.",
-                            port.network_id, port.id)
+                            port.id, port.network_id)
                 continue
 
             # Use vlan segments associated with exactly this port
