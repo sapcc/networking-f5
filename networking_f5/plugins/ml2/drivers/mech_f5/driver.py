@@ -96,8 +96,9 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         }
 
     def _ensure_selfips(self, context):
-        """ This function ensures that a listener ip has the right amount
-            selfips for all devices and assigned correctly """
+        """This function ensures that a listener ip has the right amount
+           selfips for all devices and assigned correctly
+        """
         plugin_context = context._plugin_context
         fixed_ip = context.current['fixed_ips'][0]
 
@@ -235,7 +236,8 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
 
             subnet_listeners = [port['id'] for port in
                                 context._plugin.get_ports(plugin_context, filters, fields=['id', 'name'])
-                                if not (port.get('name', '').startswith('local-') or port['id'] == context.current['id'])]
+                                if not (port.get('name', '').startswith('local-')
+                                        or port['id'] == context.current['id'])]
 
             if not subnet_listeners:
                 # No listener left, cleanup selfips
@@ -250,5 +252,6 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
                                        and selfip['name'].startswith('loadbalancer-'))]
 
                 for selfip in all_selfips:
-                    LOG.info('[delete_port_postcommit] Cleanup Self-IP of listener %s: deleting %s', context.current['id'], selfip)
+                    LOG.info('[delete_port_postcommit] Cleanup Self-IP of '
+                             'listener %s: deleting %s', context.current['id'], selfip)
                     context._plugin.delete_port(plugin_context, selfip)

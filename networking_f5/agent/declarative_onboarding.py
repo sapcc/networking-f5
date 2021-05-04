@@ -16,7 +16,6 @@ import functools
 
 import requests
 from oslo_log import log as logging
-from requests import HTTPError
 from requests.auth import HTTPBasicAuth
 from six.moves.urllib import parse
 from tenacity import retry, stop_after_attempt, \
@@ -129,7 +128,7 @@ class F5DoClient(object):
         def wrapper(self, *args, **kwargs):
             try:
                 return func(self, *args, **kwargs)
-            except HTTPError as e:
+            except requests.HTTPError as e:
                 if e.response.status_code == 401:
                     self.reauthorize()
                     return func(self, *args, **kwargs)
@@ -138,7 +137,7 @@ class F5DoClient(object):
         return wrapper
 
     @retry(
-        retry=retry_if_exception_type(HTTPError),
+        retry=retry_if_exception_type(requests.HTTPError),
         wait=wait_incrementing(
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS),
@@ -169,7 +168,7 @@ class F5DoClient(object):
         LOG.debug("Reauthorized!")
 
     @retry(
-        retry=retry_if_exception_type(HTTPError),
+        retry=retry_if_exception_type(requests.HTTPError),
         wait=wait_incrementing(
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)
@@ -186,7 +185,7 @@ class F5DoClient(object):
         return response
 
     @retry(
-        retry=retry_if_exception_type(HTTPError),
+        retry=retry_if_exception_type(requests.HTTPError),
         wait=wait_incrementing(
             RETRY_INITIAL_DELAY, RETRY_BACKOFF, RETRY_MAX),
         stop=stop_after_attempt(RETRY_ATTEMPTS)

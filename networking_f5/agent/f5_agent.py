@@ -72,17 +72,20 @@ F5_OPTS = [
                 help=_("Enable automatic cleanup of selfips (else dry-run)")),
     cfg.BoolOpt('hardware_syncookie',
                 default=True,
-                help=_("Enables hardware syncookie mode on a VLAN. When enabled, "
-                       "the hardware per-VLAN SYN cookie protection will be triggered "
-                       "when the certain traffic threshold is reached on supported platforms.")),
+                help=_("Enables hardware syncookie mode on a VLAN. When "
+                       "enabled, the hardware per-VLAN SYN cookie protection "
+                       "will be triggered when the certain traffic threshold "
+                       "is reached on supported platforms.")),
     cfg.IntOpt('syn_flood_rate_limit',
-                default=2000,
-                help=_("Specifies the max number of SYN flood packets per second received on the "
-                       "VLAN before the hardware per-VLAN SYN cookie protection is triggered.")),
+               default=2000,
+               help=_("Specifies the max number of SYN flood packets per "
+                      "second received on the VLAN before the hardware "
+                      "per-VLAN SYN cookie protection is triggered.")),
     cfg.IntOpt('syncache_threshold',
-                default=32000,
-                help=_("Specifies the number of outstanding SYN packets on the VLAN that will "
-                       "trigger the hardware per-VLAN SYN cookie protection.")),
+               default=32000,
+               help=_("Specifies the number of outstanding SYN packets on "
+                      "the VLAN that will trigger the hardware per-VLAN SYN "
+                      "cookie protection.")),
     cfg.StrOpt('override_hostname',
                default=None,
                help=_('Override hostname')),
@@ -263,12 +266,14 @@ class F5NeutronAgent(object):
         cleanup = loopingcall.FixedIntervalLoopingCall(self._cleanup)
         cleanup.start(interval=self.conf.F5.cleanup_interval)
         sync_loop = loopingcall.FixedIntervalLoopingCall(self._full_sync)
-        sync_loop.start(interval=self.conf.F5.sync_interval, stop_on_exception=False)
+        sync_loop.start(interval=self.conf.F5.sync_interval,
+                        stop_on_exception=False)
         sync_loop.wait()
 
     def _report_state(self):
         if 0 < last_full_sync < time.time() - FIVE_MINUTES:
-            LOG.warning("Last sync loop outlasted for more than five minutes (%s), skipping report",
+            LOG.warning("Last sync loop outlasted for more than five minutes"
+                        " (%s), skipping report",
                         time.strftime("%c", time.localtime(last_full_sync)))
             return
 
@@ -290,8 +295,9 @@ class F5NeutronAgent(object):
             invoke_args=(self.conf, uri, self.device_mappings)
         ).driver for uri in sorted(self.conf.F5.devices)]
         self.vcmps = [F5vCMPBackend(uri, self.device_mappings)
-                      for uri in sorted(self.conf.F5_VCMP.devices or
-                                        self.conf.F5_VCMP.hosts_guest_mappings.keys())]
+                      for uri in sorted(
+                          self.conf.F5_VCMP.devices or
+                          self.conf.F5_VCMP.hosts_guest_mappings.keys())]
         # Re-patch backend drivers
         eventlet.monkey_patch()
 
@@ -336,12 +342,15 @@ class F5NeutronAgent(object):
         LOG.debug("Sync loop finished")
         port_up_ids = self.get_all_devices()
         if self.port_up_ids != port_up_ids:
-            self.plugin_rpc.update_device_list(self.context, port_up_ids, [], self.agent_id, self.conf.host)
+            self.plugin_rpc.update_device_list(self.context, port_up_ids, [],
+                                               self.agent_id, self.conf.host)
             self.port_up_ids = port_up_ids
 
     def _cleanup(self):
-        LOG.debug("Running (dry-run=%s) cleanup for agent %s", not self.conf.F5.cleanup, self.host)
-        self.agent_rpc.cleanup_selfips_for_agent(self.context, dry_run=not self.conf.F5.cleanup)
+        LOG.debug("Running (dry-run=%s) cleanup for agent %s",
+                  not self.conf.F5.cleanup, self.host)
+        self.agent_rpc.cleanup_selfips_for_agent(
+            self.context, dry_run=not self.conf.F5.cleanup)
 
 
 def main():

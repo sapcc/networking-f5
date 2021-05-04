@@ -149,9 +149,9 @@ class F5vCMPBackend(object):
             expected = ['/Common/{}{}'.format(constants.PREFIX_VLAN, vlan['tag'])
                         for vlan in list(vlans.values())]
             expected.extend([six.text_type(mgmt_vlan)
-                              for mgmt_vlan in guest.vlans
-                              if not mgmt_vlan.startswith(
-                              '/Common/' + constants.PREFIX_VLAN)])
+                             for mgmt_vlan in guest.vlans
+                             if not mgmt_vlan.startswith(
+                             '/Common/' + constants.PREFIX_VLAN)])
             if collections.Counter(
                 expected) != collections.Counter(guest.vlans):
                 guest.vlans = expected

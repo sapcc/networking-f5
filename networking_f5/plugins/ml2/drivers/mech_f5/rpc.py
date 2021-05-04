@@ -169,8 +169,8 @@ class F5DORpcCallback(object):
                    'binding:host_id': [host],
                    'fixed_ips': {'subnet_id': [selfip['fixed_ips'][0]['subnet_id'] for selfip in all_selfips]}}
         listener_subnets = set([port['fixed_ips'][0]['subnet_id'] for port in
-                            self.plugin.get_ports(context, filters, fields=['fixed_ips', 'name'])
-                            if not port.get('name', '').startswith('local-')])
+                                self.plugin.get_ports(context, filters, fields=['fixed_ips', 'name'])
+                                if not port.get('name', '').startswith('local-')])
 
         for selfip in all_selfips:
             if selfip['fixed_ips'][0]['subnet_id'] not in listener_subnets:

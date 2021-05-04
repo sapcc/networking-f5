@@ -36,9 +36,12 @@ RETRY_BACKOFF = 5
 RETRY_MAX = 3
 
 PROM_ACTION = Counter('networking_f5_action',
-                      'Update/Creations/Deletion of l2 entities', ['type', 'action'])
-REQUEST_SYNC_EXCEPTIONS = Counter('networking_f5_sync_exceptions', 'Sync exception count', ['type'])
-REQUEST_TIME_SYNC = Summary('networking_f5_sync_seconds', 'Time spent processing entities',
+                      'Update/Creations/Deletion of l2 entities',
+                      ['type', 'action'])
+REQUEST_SYNC_EXCEPTIONS = Counter('networking_f5_sync_exceptions',
+                                  'Sync exception count', ['type'])
+REQUEST_TIME_SYNC = Summary('networking_f5_sync_seconds',
+                            'Time spent processing entities',
                             ['type'])
 
 
@@ -152,7 +155,6 @@ class F5iControlRestBackend(F5Backend):
                         PROM_ACTION.labels(type='vlan', action='update').inc()
                         old_vlan.update()
 
-
                 # orphaned
                 else:
                     orphaned.append(old_vlan)
@@ -166,23 +168,23 @@ class F5iControlRestBackend(F5Backend):
                           tag=vlan['tag'], mtu=vlan['mtu'],
                           hardwareSyncookie='enabled' if self.conf.F5.hardware_syncookie else 'disabled',
                           synFloodRateLimit=self.conf.F5.syn_flood_rate_limit,
-                          syncacheThreshold=self.conf.F5.syncache_threshold
-            )
+                          syncacheThreshold=self.conf.F5.syncache_threshold)
 
         return orphaned
 
     def _sync_selfips(self, selfips):
         orphaned = []
+
         def convert_ip(selfip):
             if selfip['ip_address'].find('/') >= 0:
                 selfip['prefixlen'] = netaddr.IPNetwork(selfip['ip_address']).prefixlen
                 selfip['ip_address'] = str(netaddr.IPNetwork(selfip['ip_address']).ip)
 
             return '{}%{}/{}'.format(
-                    selfip['ip_address'],
-                    selfip['tag'],
-                    selfip['prefixlen']
-                )
+                selfip['ip_address'],
+                selfip['tag'],
+                selfip['prefixlen']
+            )
 
         def get_vlan_path(selfip):
             return '/Common/{}{}'.format(
@@ -331,7 +333,7 @@ class F5iControlRestBackend(F5Backend):
             network = 'default%{}'.format(selfip['tag'])
             PROM_ACTION.labels(type='route', action='create').inc()
             routes.route.create(network=network, gw=gateway,
-                name=name, partition='Common')
+                                name=name, partition='Common')
 
         return orphaned
 
