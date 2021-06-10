@@ -37,6 +37,7 @@ from networking_f5.agent.vcmp import F5vCMPBackend
 from neutron.agent import rpc as agent_rpc
 from neutron.common import config as common_config
 from neutron.conf.agent import common as agent_config
+from neutron.conf import service
 
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
 eventlet.monkey_patch()
@@ -123,6 +124,7 @@ def list_opts():
 def register_f5_opts(conf):
     conf.register_opts(F5_OPTS, 'F5')
     conf.register_opts(F5_VMCP_OPTS, 'F5_VCMP')
+    conf.register_opts(service.RPC_EXTRA_OPTS)
 
 
 @six.add_metaclass(abc.ABCMeta)
