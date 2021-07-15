@@ -14,120 +14,42 @@
 
 import abc
 import sys
+import threading
 import time
-
-import eventlet
-eventlet.monkey_patch()
 
 import oslo_messaging
 import six
-import threading
+from futurist import ThreadPoolExecutor
+from futurist import periodics
+from oslo_concurrency import lockutils
+from oslo_config import cfg
+from oslo_log import log as logging
+from oslo_utils import eventletutils
+from prometheus_client import Counter, start_http_server
+from stevedore import driver
 
+from networking_f5 import config  # noqa
+from networking_f5 import constants
+from networking_f5.agent.vcmp import F5vCMPBackend
+from neutron.agent import rpc as agent_rpc
+from neutron.common import config as common_config
+from neutron.conf.agent import common as agent_config
 from neutron_lib import constants as n_const
 from neutron_lib import context
 from neutron_lib import rpc as n_rpc
 from neutron_lib.agent import topics
 from neutron_lib.utils import helpers
-from oslo_concurrency import lockutils
-from oslo_config import cfg
-from oslo_log import log as logging
-from oslo_service import loopingcall
-from prometheus_client import Counter, MetricsHandler, REGISTRY
-from stevedore import driver
 
-from networking_f5 import constants
-from networking_f5._i18n import _
-from networking_f5.agent.vcmp import F5vCMPBackend
-from neutron.agent import rpc as agent_rpc
-from neutron.common import config as common_config
-from neutron.conf.agent import common as agent_config
-from neutron.conf import service
-
-# oslo_messaging/notify/listener.py documents that monkeypatching is required
-
+CONF = cfg.CONF
+LOG = logging.getLogger(__name__)
 FULL_SYNC_EXCEPTIONS = Counter('networking_f5_full_sync_exceptions', 'Full Sync exception count')
 SYNC_ITERATIONS = Counter('networking_f5_sync_iteration', 'Sync iterations', ['type'])
 FIVE_MINUTES = 5 * 60
-LOG = logging.getLogger(__name__)
+
 last_full_sync = .0
-
-F5_OPTS = [
-    cfg.StrOpt('backend',
-               default='icontrol',
-               choices=['do', 'icontrol', 'noop'],
-               help=_('Backend driver for BigIP F5 communication')),
-    cfg.FloatOpt('sync_interval', default=90,
-                 help=_('Seconds between full sync.')),
-    cfg.FloatOpt('cleanup_interval', default=600,
-                 help=_('Seconds between selfip cleanups.')),
-    cfg.FloatOpt('selfip_interval', default=1200,
-                 help=_('Seconds between selfip sync.')),
-    cfg.ListOpt('physical_device_mappings',
-                default=[],
-                help=_("List of <physical_network>:<device_interface>.")),
-    cfg.ListOpt('devices',
-                item_type=cfg.types.URI(schemes=['http', 'https']),
-                default=[],
-                help=_("List of device urls to be synced by the agent")),
-    cfg.BoolOpt('https_verify',
-                default=False,
-                help=_("Verify https endpoint")),
-    cfg.BoolOpt('prometheus',
-                default=True,
-                help=_("Enable prometheus metrics exporter")),
-    cfg.BoolOpt('cleanup',
-                default=False,
-                help=_("Enable automatic cleanup of selfips (else dry-run)")),
-    cfg.BoolOpt('hardware_syncookie',
-                default=True,
-                help=_("Enables hardware syncookie mode on a VLAN. When "
-                       "enabled, the hardware per-VLAN SYN cookie protection "
-                       "will be triggered when the certain traffic threshold "
-                       "is reached on supported platforms.")),
-    cfg.IntOpt('syn_flood_rate_limit',
-               default=2000,
-               help=_("Specifies the max number of SYN flood packets per "
-                      "second received on the VLAN before the hardware "
-                      "per-VLAN SYN cookie protection is triggered.")),
-    cfg.IntOpt('syncache_threshold',
-               default=32000,
-               help=_("Specifies the number of outstanding SYN packets on "
-                      "the VLAN that will trigger the hardware per-VLAN SYN "
-                      "cookie protection.")),
-    cfg.StrOpt('override_hostname',
-               default=None,
-               help=_('Override hostname')),
-]
-
-F5_VMCP_OPTS = [
-    cfg.StrOpt('username',
-               deprecated_for_removal=True,
-               help=_('Username for vCMP Host.')),
-    cfg.StrOpt('password',
-               secret=True,
-               deprecated_for_removal=True,
-               help=_('Password for vCMP Host')),
-    cfg.ListOpt('devices',
-                item_type=cfg.types.URI(schemes=['http', 'https']),
-                default=[],
-                help=_("List of device urls to be synced by the agent")),
-    cfg.DictOpt('hosts_guest_mappings',
-                default={},
-                help=_("VCMP host and respective guest name mapping for "
-                       "assigning VLANs, consisting of a list "
-                       "of <host>:<guest_name>."),
-                )
-]
-
-
-def list_opts():
-    return [('agent', agent_config.AGENT_STATE_OPTS)]
-
-
-def register_f5_opts(conf):
-    conf.register_opts(F5_OPTS, 'F5')
-    conf.register_opts(F5_VMCP_OPTS, 'F5_VCMP')
-    conf.register_opts(service.RPC_EXTRA_OPTS)
+CONF.import_group('F5', 'networking_f5.config')
+CONF.import_group('F5_VCMP', 'networking_f5.config')
+agent_config.register_agent_state_opts_helper(CONF)
 
 
 @six.add_metaclass(abc.ABCMeta)
@@ -221,32 +143,32 @@ class F5AgentRpcCallBack(object):
             LOG.debug("Got Port update for VIP %s, ensuring selfips", kwargs['port'])
             self.agent.agent_rpc.ensure_selfips_for_agent(self.agent.context)
         elif (port['device_owner'] == constants.DEVICE_OWNER_SELFIP and
-                port['binding:host_id'] == self.agent.conf.host and
-                port['status'] == 'DOWN'):
+              port['binding:host_id'] == self.agent.conf.host and
+              port['status'] == 'DOWN'):
             LOG.debug("Got Port update for self ip %s", kwargs['port'])
             self.agent._full_sync()
 
 
 class F5NeutronAgent(object):
+    common_config.init(sys.argv[1:])
+
     def __init__(self, device_mappings):
         self.device_mappings = device_mappings
-        self.conf = cfg.CONF
-        self.host = self.conf.host
+        self.host = CONF.host
         self.devices = []
         self.port_up_ids = []
         self.vcmps = []
-        self.pool = eventlet.GreenPool()
 
         self._connect()
         self.agent_state = {
             'binary': constants.AGENT_BINARY,
-            'host': cfg.CONF.host,
+            'host': CONF.host,
             'topic': n_const.L2_AGENT_TOPIC,
             'configurations': self.get_agent_configurations(),
             'agent_type': constants.AGENT_TYPE_F5,
             'start_flag': True}
 
-        if self.conf.debug:
+        if CONF.debug:
             # OSX workaround
             sys.setrecursionlimit(15000)
 
@@ -270,29 +192,25 @@ class F5NeutronAgent(object):
                                                      start_listening=False)
 
     def run(self):
-        LOG.info('networking-f5-agent initialized, running...')
+        LOG.info('networking-f5-agent initialized, eventlet=%s, running...',
+                 eventletutils.is_monkey_patched('thread'))
+
         if cfg.CONF.F5.prometheus:
             LOG.info('Exposing Prometheus metrics on port 8000')
-            CustomMetricsHandler = MetricsHandler.factory(REGISTRY)
-            from eventlet.green.http.server import HTTPServer
-            server = HTTPServer(('', 8000), CustomMetricsHandler)
-            thread = threading.Thread(target=server.serve_forever)
-            thread.start()
+            start_http_server(8000)
         self.connection.consume_in_threads()
-        heartbeat = loopingcall.FixedIntervalLoopingCall(self._report_state)
-        heartbeat.start(
-            interval=self.conf.AGENT.report_interval,
-            initial_delay=self.conf.AGENT.report_interval,
-            stop_on_exception=False)
-        cleanup = loopingcall.FixedIntervalLoopingCall(self._cleanup)
-        cleanup.start(interval=self.conf.F5.cleanup_interval)
-        ensure_selfip = loopingcall.FixedIntervalLoopingCall(self._ensure_selfips)
-        ensure_selfip.start(interval=self.conf.F5.selfip_interval)
-        sync_loop = loopingcall.FixedIntervalLoopingCall(self._full_sync)
-        sync_loop.start(interval=self.conf.F5.sync_interval,
-                        stop_on_exception=False)
-        sync_loop.wait()
+        worker = periodics.PeriodicWorker(
+            [(self._report_state, None, None),
+             (self._cleanup, None, None),
+             (self._ensure_selfips, None, None),
+             (self._full_sync, None, None)]
+        )
+        t = threading.Thread(target=worker.start)
+        t.daemon = True
+        t.start()
+        t.join()
 
+    @periodics.periodic(CONF.AGENT.report_interval)
     def _report_state(self):
         if 0 < last_full_sync < time.time() - FIVE_MINUTES:
             LOG.warning("Last sync loop outlasted for more than five minutes"
@@ -313,16 +231,14 @@ class F5NeutronAgent(object):
     def _connect(self):
         self.devices = [driver.DriverManager(
             namespace='neutron.ml2.f5.backend_drivers',
-            name=self.conf.F5.backend,
+            name=CONF.F5.backend,
             invoke_on_load=True,
-            invoke_args=(self.conf, uri, self.device_mappings)
-        ).driver for uri in sorted(self.conf.F5.devices)]
+            invoke_args=(CONF, uri, self.device_mappings)
+        ).driver for uri in sorted(CONF.F5.devices)]
         self.vcmps = [F5vCMPBackend(uri, self.device_mappings)
                       for uri in sorted(
-                          self.conf.F5_VCMP.devices or
-                          self.conf.F5_VCMP.hosts_guest_mappings.keys())]
-        # Re-patch backend drivers
-        eventlet.monkey_patch()
+                CONF.F5_VCMP.devices or
+                CONF.F5_VCMP.hosts_guest_mappings.keys())]
 
     def get_all_devices(self):
         all_devices = set()
@@ -333,12 +249,13 @@ class F5NeutronAgent(object):
     def get_agent_configurations(self):
         return {
             'device_mappings': self.device_mappings,
-            'log_agent_heartbeats': self.conf.AGENT.log_agent_heartbeats,
+            'log_agent_heartbeats': CONF.AGENT.log_agent_heartbeats,
             'device_hosts': {
                 device.get_host(): device.get_mac() for device in self.devices
             },
         }
 
+    @periodics.periodic(CONF.F5.sync_interval, run_immediately=True)
     @lockutils.synchronized('_f5_full_sync')
     @FULL_SYNC_EXCEPTIONS.count_exceptions()
     def _full_sync(self):
@@ -348,27 +265,26 @@ class F5NeutronAgent(object):
         rds_in_use = set()
         for device in self.devices:
             rds_in_use.update(device.rd_in_use())
+        with ThreadPoolExecutor(max_workers=4) as executer:
+            for device in self.devices:
+                LOG.debug("Syncing F5 device %s", device.get_host())
+                executer.submit(
+                    device.sync_all,
+                    vlans=res.get('vlans', {}).copy(),
+                    selfips={
+                        key: val for key, val in res.get(
+                            'selfips',
+                            {}).items() if
+                        device.get_host() == val.get('host', None)
+                    },
+                    rds_in_use=rds_in_use
+                )
 
-        for device in self.devices:
-            LOG.debug("Syncing F5 device %s", device.get_host())
-            self.pool.spawn_n(
-                device.sync_all,
-                vlans=res.get('vlans', {}).copy(),
-                selfips={
-                    key: val for key, val in res.get(
-                        'selfips',
-                        {}).items() if
-                    device.get_host() == val.get('host', None)
-                },
-                rds_in_use=rds_in_use
-            )
-
-        for vcmp in self.vcmps:
-            LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
-            self.pool.spawn_n(vcmp.sync_vlan, res['vlans'].copy())
+            for vcmp in self.vcmps:
+                LOG.debug("Syncing VCMP host %s", vcmp.vcmp_host)
+                executer.submit(vcmp.sync_vlan, res['vlans'].copy())
 
         global last_full_sync
-        self.pool.waitall()
         last_full_sync = time.time()
 
         LOG.debug("Sync loop finished")
@@ -376,16 +292,18 @@ class F5NeutronAgent(object):
         port_up_ids = self.get_all_devices()
         if self.port_up_ids != port_up_ids:
             self.plugin_rpc.update_device_list(self.context, port_up_ids, [],
-                                               self.agent_id, self.conf.host)
+                                               self.agent_id, CONF.host)
             self.port_up_ids = port_up_ids
 
+    @periodics.periodic(CONF.F5.cleanup_interval, run_immediately=True)
     def _cleanup(self):
         LOG.debug("Running (dry-run=%s) cleanup for agent %s",
-                  not self.conf.F5.cleanup, self.host)
+                  not CONF.F5.cleanup, self.host)
         self.agent_rpc.cleanup_selfips_for_agent(
-            self.context, dry_run=not self.conf.F5.cleanup)
+            self.context, dry_run=not CONF.F5.cleanup)
         SYNC_ITERATIONS.labels('cleanup').inc()
 
+    @periodics.periodic(CONF.F5.selfip_interval, run_immediately=True)
     def _ensure_selfips(self):
         LOG.debug("Running ensure_selfips for agent %s", self.host)
         self.agent_rpc.ensure_selfips_for_agent(self.context)
@@ -393,14 +311,12 @@ class F5NeutronAgent(object):
 
 
 def main():
-    register_f5_opts(cfg.CONF)
-    agent_config.register_agent_state_opts_helper(cfg.CONF)
     common_config.init(sys.argv[1:])
     common_config.setup_logging()
 
     try:
         device_mappings = helpers.parse_mappings(
-            cfg.CONF.F5.physical_device_mappings)
+            CONF.F5.physical_device_mappings)
     except ValueError as e:
         LOG.error("Parsing physical_device_mappings failed: %s. "
                   "Agent terminated!", e)
