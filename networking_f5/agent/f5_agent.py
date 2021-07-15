@@ -17,8 +17,12 @@ import sys
 import time
 
 import eventlet
+eventlet.monkey_patch()
+
 import oslo_messaging
 import six
+import threading
+
 from neutron_lib import constants as n_const
 from neutron_lib import context
 from neutron_lib import rpc as n_rpc
@@ -28,7 +32,7 @@ from oslo_concurrency import lockutils
 from oslo_config import cfg
 from oslo_log import log as logging
 from oslo_service import loopingcall
-from prometheus_client import start_http_server, Counter
+from prometheus_client import Counter, MetricsHandler, REGISTRY
 from stevedore import driver
 
 from networking_f5 import constants
@@ -40,7 +44,6 @@ from neutron.conf.agent import common as agent_config
 from neutron.conf import service
 
 # oslo_messaging/notify/listener.py documents that monkeypatching is required
-eventlet.monkey_patch()
 
 FULL_SYNC_EXCEPTIONS = Counter('networking_f5_full_sync_exceptions', 'Full Sync exception count')
 SYNC_ITERATIONS = Counter('networking_f5_sync_iteration', 'Sync iterations', ['type'])
@@ -270,7 +273,11 @@ class F5NeutronAgent(object):
         LOG.info('networking-f5-agent initialized, running...')
         if cfg.CONF.F5.prometheus:
             LOG.info('Exposing Prometheus metrics on port 8000')
-            start_http_server(8000)
+            CustomMetricsHandler = MetricsHandler.factory(REGISTRY)
+            from eventlet.green.http.server import HTTPServer
+            server = HTTPServer(('', 8000), CustomMetricsHandler)
+            thread = threading.Thread(target=server.serve_forever)
+            thread.start()
         self.connection.consume_in_threads()
         heartbeat = loopingcall.FixedIntervalLoopingCall(self._report_state)
         heartbeat.start(
