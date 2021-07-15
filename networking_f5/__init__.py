@@ -14,6 +14,11 @@
 
 import pbr.version
 
+from neutron.conf.agent import common as agent_config
 
 __version__ = pbr.version.VersionInfo(
     'networking-f5').version_string()
+
+
+def list_opts():
+    return [('agent', agent_config.AGENT_STATE_OPTS)]
