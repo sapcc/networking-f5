@@ -19,6 +19,7 @@ from neutron_lib import rpc
 from neutron_lib.agent import topics
 from neutron_lib.api.definitions import portbindings
 from neutron_lib.callbacks import resources
+from neutron_lib.db import api as db_api
 from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_log import log
@@ -176,12 +177,17 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         if context.current['allowed_address_pairs'] != allowed_address_pairs:
             # update allowed_address_pairs with self-ips
             port_update = {'port': {'allowed_address_pairs': allowed_address_pairs}}
-            context._plugin.update_address_pairs_on_port(plugin_context,
-                                                         context.current['id'],
-                                                         port_update,
-                                                         context.current,
-                                                         context.current)
+            self._update_address_pairs_on_port(context, port_update)
         return selfips
+
+    @db_api.retry_db_errors
+    def _update_address_pairs_on_port(self, context, port_update):
+        plugin_context = context._plugin_context
+        context._plugin.update_address_pairs_on_port(plugin_context,
+                                                     context.current['id'],
+                                                     port_update,
+                                                     context.current,
+                                                     context.current)
 
     def update_port_postcommit(self, context):
         plugin_context = context._plugin_context
