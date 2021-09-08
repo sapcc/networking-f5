@@ -159,7 +159,8 @@ class F5DORpcCallback(object):
         # Fetch all selfip ports for this host
         filters = {'device_owner': [constants.DEVICE_OWNER_SELFIP,
                                     constants.DEVICE_OWNER_LEGACY],
-                   'binding:host_id': [host]}
+                   'binding:host_id': [host],
+                   'admin_state_up': [True]}
 
         # special handling for legacy selfips
         all_selfips = [selfip for selfip
