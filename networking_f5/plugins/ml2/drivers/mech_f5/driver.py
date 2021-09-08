@@ -169,9 +169,10 @@ class F5MechanismDriver(mech_agent.SimpleAgentMechanismDriverBase,
         # Update allowed address pairs if needed
         subnet = self.get_subnet(plugin_context, fixed_ip['subnet_id'])
         allowed_address_pairs = [
-            {'ip_address': "{}/{}".format(
-                selfip['fixed_ips'][0]['ip_address'], IPNetwork(subnet['cidr']).prefixlen
-            ), 'mac_address': f5_hosts.get(selfip['description'], '00:00:00:00:00:00')}
+            {
+                'ip_address': "{}/32".format(selfip['fixed_ips'][0]['ip_address']),
+                'mac_address': f5_hosts.get(selfip['description'], '00:00:00:00:00:00')
+            }
             for selfip in selfips
         ]
         if context.current['allowed_address_pairs'] != allowed_address_pairs:
