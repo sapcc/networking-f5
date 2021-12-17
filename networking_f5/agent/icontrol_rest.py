@@ -293,6 +293,14 @@ class F5iControlRestBackend(F5Backend):
         return orphaned
 
     def _sync_routes(self, selfips):
+        def _get_network_gw(tag, gw_ip):
+            gwaddress = netaddr.IPAddress(gw_ip)
+            if gwaddress.version == 4:
+                return 'default%{}'.format(tag)
+            if gwaddress.version == 6:
+                return 'default-inet6%{}'.format(tag)
+            raise Exception("Gateway IP {} type not supported".format(gw_ip))
+
         # Sync Routes only on active device because routes are synced
         if not self.is_active():
             return []
@@ -324,7 +332,7 @@ class F5iControlRestBackend(F5Backend):
                         selfip['gateway_ip'],
                         selfip['tag']
                     )
-                    network = 'default%{}'.format(selfip['tag'])
+                    network = _get_network_gw(selfip['tag'], selfip['gateway_ip'])
                     if route.gw != gateway or route.network != network:
                         route.gw = gateway
                         route.network = network
@@ -343,7 +351,7 @@ class F5iControlRestBackend(F5Backend):
                 selfip['gateway_ip'],
                 selfip['tag']
             )
-            network = 'default%{}'.format(selfip['tag'])
+            network = _get_network_gw(selfip['tag'], selfip['gateway_ip'])
             PROM_ACTION.labels(type='route', action='create').inc()
             routes.route.create(network=network, gw=gateway,
                                 name=name, partition='Common')
