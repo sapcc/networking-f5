@@ -11,26 +11,14 @@
 # WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the
 # License for the specific language governing permissions and limitations
 # under the License.
-import re
 
-from netaddr import IPNetwork
 from neutron_lib import constants as p_constants
-from neutron_lib import rpc
-from neutron_lib.agent import topics
 from neutron_lib.api.definitions import portbindings
-from neutron_lib.callbacks import resources
-from neutron_lib.db import api as db_api
 from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_log import log
 
 from networking_f5 import constants
-from networking_f5.plugins.ml2.drivers.mech_f5.rpc import F5DORpcCallback
-from neutron import service
-from neutron.db import db_base_plugin_v2
-from neutron.db import provisioning_blocks
-from neutron.plugins.ml2 import rpc as ml2_rpc
-from neutron.plugins.ml2.drivers import mech_agent
 
 LOG = log.getLogger(__name__)
 
@@ -86,7 +74,7 @@ class F5MechanismDriver(api.MechanismDriver):
                 if physnet in self.physical_networks:
                     self._set_binding(context, segment)
                     return
-            elif segment.get('network_type') == portbindings.VIF_DETAILS_VLAN:
+            elif segment.get('network_type') == p_constants.TYPE_VLAN:
                 self._set_binding(context, segment)
                 return
 
