@@ -68,6 +68,7 @@ class F5MechanismDriver(api.MechanismDriver):
         if device_owner not in self.supported_device_owners:
             LOG.debug("Refusing to bind due to unsupported device_owner: %s",
                       device_owner)
+            return
         for segment in context.segments_to_bind:
             if self.physical_networks:
                 physnet = segment.get('physical_network')
