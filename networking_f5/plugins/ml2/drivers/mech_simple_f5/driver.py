@@ -43,7 +43,8 @@ class F5MechanismDriver(api.MechanismDriver):
         self.vif_details = {
             portbindings.VIF_DETAILS_CONNECTIVITY: portbindings.CONNECTIVITY_L2,
             portbindings.CAP_PORT_FILTER: False}
-        self.supported_vnic_types = [portbindings.VNIC_NORMAL]
+        self.supported_vnic_types = [portbindings.VNIC_NORMAL,
+                                     portbindings.VNIC_BAREMETAL]
         self.supported_device_owners = [constants.DEVICE_OWNER_SELFIP,
                                         constants.DEVICE_OWNER_LISTENER,
                                         constants.DEVICE_OWNER_LEGACY]
