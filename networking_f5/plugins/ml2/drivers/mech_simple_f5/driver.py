@@ -28,7 +28,12 @@ CONF.register_opts([
                 default=[],
                 help="List of pyhsical networks the driver should use to"
                      "indentify the segment to use (if not specified"
-                     "driver will use first segment in the list)")
+                     "driver will use first segment in the list)"),
+    cfg.ListOpt('supported_device_owners',
+                default=[constants.DEVICE_OWNER_SELFIP,
+                         constants.DEVICE_OWNER_LISTENER,
+                         constants.DEVICE_OWNER_LEGACY],
+                help="Override list of supported device owners")
 ], 'ml2_f5')
 
 
@@ -45,11 +50,10 @@ class F5MechanismDriver(api.MechanismDriver):
             portbindings.CAP_PORT_FILTER: False}
         self.supported_vnic_types = [portbindings.VNIC_NORMAL,
                                      portbindings.VNIC_BAREMETAL]
-        self.supported_device_owners = [constants.DEVICE_OWNER_SELFIP,
-                                        constants.DEVICE_OWNER_LISTENER,
-                                        constants.DEVICE_OWNER_LEGACY]
+        self.supported_device_owners = CONF.ml2_f5.supported_device_owners
         self.physical_networks = CONF.ml2_f5.physical_networks
-        LOG.info("F5 Simple ML2 mechanism driver initialized...")
+        LOG.info("F5 Simple ML2 mechanism driver initialized for device-owners: %s",
+                 self.supported_device_owners)
 
     def initialize(self):
         pass
