@@ -90,7 +90,7 @@ class F5MechanismDriver(api.MechanismDriver):
             retry=CONF.ml2_f5_notifications.retry,
             publisher_id=f"networking_f5.{CONF.host}")
 
-    def _notifify(self, security_group_id, action):
+    def _notify(self, security_group_id, action):
         cxt = context.get_admin_context()
         if CONF.ml2_f5_notifications.driver == 'noop':
             return
@@ -118,15 +118,15 @@ class F5MechanismDriver(api.MechanismDriver):
 
     def _process_security_group_after_delete(
             self, resource, event, trigger, payload):
-        self._notifify(payload.resource_id, 'deleted')
+        self._notify(payload.resource_id, 'deleted')
 
     def _process_security_group_rule_after_create(
             self, resource, event, trigger, payload):
-        self._notifify(payload.latest_state['security_group_id'], 'updated')
+        self._notify(payload.latest_state['security_group_id'], 'updated')
 
     def _process_security_group_rule_after_delete(
             self, resource, event, trigger, payload):
-        self._notifify(payload.metadata['security_group_id'], 'updated')
+        self._notify(payload.metadata['security_group_id'], 'updated')
 
     def bind_port(self, context):
         LOG.debug("Attempting to bind port %(port)s on "
