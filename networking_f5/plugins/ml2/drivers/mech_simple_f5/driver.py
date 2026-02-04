@@ -101,6 +101,10 @@ class F5MechanismDriver(api.MechanismDriver):
 
     def initialize(self):
         self.notifier = self._get_notifier()
+        # Plugin watches only security_group.delete, security_group_rule.create,
+        # security_group_rule.delete events because a user cannot add a Security
+        # Group when a LoadBalancer is already created. It means all actions
+        # with rules can be monitored with these 3 events.
         registry.subscribe(self._process_security_group_after_delete,
                            resources.SECURITY_GROUP,
                            events.AFTER_DELETE)
