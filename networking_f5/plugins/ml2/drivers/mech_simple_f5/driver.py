@@ -14,9 +14,14 @@
 
 from neutron_lib import constants as p_constants
 from neutron_lib.api.definitions import portbindings
+from neutron_lib.callbacks import events
+from neutron_lib.callbacks import registry
+from neutron_lib.callbacks import resources
+from neutron_lib import context
 from neutron_lib.plugins.ml2 import api
 from oslo_config import cfg
 from oslo_log import log
+import oslo_messaging
 
 from networking_f5 import constants
 
@@ -35,6 +40,25 @@ CONF.register_opts([
                          constants.DEVICE_OWNER_LEGACY],
                 help="Override list of supported device owners")
 ], 'ml2_f5')
+CONF.register_opts([
+    cfg.StrOpt('driver',
+               default='noop',
+               help='The Drivers to handle sending notifications. '
+                    'Possible values are messaging, messagingv2, '
+                    'routing, log, test, noop'),
+    cfg.StrOpt('transport_url',
+               secret=True,
+               help='A URL representing the messaging driver to use for '
+                    'notifications. If not set, we fall back to the same '
+                    'configuration used for RPC.'),
+    cfg.ListOpt('topics',
+                default=['notifications', ],
+                help='AMQP topic used for OpenStack notifications.'),
+    cfg.IntOpt('retry', default=-1,
+               help='The maximum number of attempts to re-send a notification '
+                    'message which failed to be delivered due to a '
+                    'recoverable error. 0 - No retry, -1 - indefinite'),
+], 'ml2_f5_notifications')
 
 
 class F5MechanismDriver(api.MechanismDriver):
@@ -52,11 +76,57 @@ class F5MechanismDriver(api.MechanismDriver):
                                      portbindings.VNIC_BAREMETAL]
         self.supported_device_owners = CONF.ml2_f5.supported_device_owners
         self.physical_networks = CONF.ml2_f5.physical_networks
+        self.notification_transport = oslo_messaging.get_notification_transport(
+            CONF, url=CONF.ml2_f5_notifications.transport_url)
+        self.notifier = None
         LOG.info("F5 Simple ML2 mechanism driver initialized for device-owners: %s",
                  self.supported_device_owners)
 
+    def _get_notifier(self):
+        return oslo_messaging.Notifier(
+            transport=self.notification_transport,
+            driver=CONF.ml2_f5_notifications.driver,
+            topics=CONF.ml2_f5_notifications.topics,
+            retry=CONF.ml2_f5_notifications.retry,
+            publisher_id=f"networking_f5.{CONF.host}")
+
+    def _notify(self, security_group_id, action):
+        cxt = context.get_admin_context()
+        if CONF.ml2_f5_notifications.driver == 'noop':
+            return
+        LOG.debug("Networking F5 mechanism driver sending notification about "
+                  f"{action} Security Group {security_group_id}")
+        self.notifier.info(cxt, f'security_group.{action}',
+                           {'security_group_id': security_group_id})
+
     def initialize(self):
-        pass
+        self.notifier = self._get_notifier()
+        # Plugin watches only security_group.delete, security_group_rule.create,
+        # security_group_rule.delete events because a user cannot add a Security
+        # Group when a LoadBalancer is already created. It means all actions
+        # with rules can be monitored with these 3 events.
+        registry.subscribe(self._process_security_group_after_delete,
+                           resources.SECURITY_GROUP,
+                           events.AFTER_DELETE)
+        registry.subscribe(self._process_security_group_rule_after_create,
+                           resources.SECURITY_GROUP_RULE,
+                           events.AFTER_CREATE)
+        registry.subscribe(self._process_security_group_rule_after_delete,
+                           resources.SECURITY_GROUP_RULE,
+                           events.AFTER_DELETE)
+        LOG.info("Networking F5 mechanism driver initialized")
+
+    def _process_security_group_after_delete(
+            self, resource, event, trigger, payload):
+        self._notify(payload.resource_id, 'deleted')
+
+    def _process_security_group_rule_after_create(
+            self, resource, event, trigger, payload):
+        self._notify(payload.latest_state['security_group_id'], 'updated')
+
+    def _process_security_group_rule_after_delete(
+            self, resource, event, trigger, payload):
+        self._notify(payload.metadata['security_group_id'], 'updated')
 
     def bind_port(self, context):
         LOG.debug("Attempting to bind port %(port)s on "
@@ -89,3 +159,4 @@ class F5MechanismDriver(api.MechanismDriver):
                             self.vif_type,
                             self.vif_details,
                             p_constants.ACTIVE)
+
